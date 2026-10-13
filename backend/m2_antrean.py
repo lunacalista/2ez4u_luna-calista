@@ -339,6 +339,13 @@ def proses_kasir(ekspresi):
 # ------------------------------------------------------------------
 # Manajer: aksi antrean + undo/redo, menjaga kedua antrean tetap sama
 # ------------------------------------------------------------------
+def _nama(item):
+    """oid bila item adalah Pesanan, selain itu teksnya sendiri."""
+    if hasattr(item, "oid"):
+        return item.oid
+    return str(item)
+
+
 class ManajerUndoRedo:
     def __init__(self, antrean_naif=None, antrean_circular=None):
         self.naif = antrean_naif if antrean_naif is not None else AntreanNaif()
@@ -395,6 +402,26 @@ class ManajerUndoRedo:
             self._catat("DEQUEUE", items)
         return items, ms_naif, ms_circ
 
+    def _dequeue_satu(self, antrean, tipe, n):
+        if n > antrean.size():
+            n = antrean.size()
+        items = []
+        t0 = time.perf_counter()
+        for _ in range(n):
+            items.append(antrean.dequeue())
+        ms = (time.perf_counter() - t0) * 1000
+        if len(items) > 0:
+            self._catat(tipe, items)
+        return items, ms
+
+    def dequeue_naif(self, n=1):
+        """Mengeluarkan n pesanan hanya dari antrean NAIF. Mengembalikan (daftar, ms)."""
+        return self._dequeue_satu(self.naif, "DEQUEUE_NAIF", n)
+
+    def dequeue_circular(self, n=1):
+        """Mengeluarkan n pesanan hanya dari antrean MELINGKAR. Mengembalikan (daftar, ms)."""
+        return self._dequeue_satu(self.circular, "DEQUEUE_CIRCULAR", n)
+
     def undo_last(self):
         if self.undo_stack.is_empty():
             return "Tidak ada aksi yang bisa dibatalkan."
@@ -405,7 +432,15 @@ class ManajerUndoRedo:
             if not self._naif_basi:
                 self.naif.pop_belakang()
             self.circular.pop_belakang()
-            pesan = f"Pembatalan enqueue: {data} dikeluarkan lagi dari belakang."
+            pesan = f"Pembatalan enqueue: {_nama(data)} dikeluarkan lagi dari belakang."
+        elif tipe == "DEQUEUE_NAIF":
+            for i in range(len(data) - 1, -1, -1):
+                self.naif.push_depan(data[i])
+            pesan = f"Pembatalan dequeue: {len(data)} pesanan dikembalikan ke DEPAN antrean naif."
+        elif tipe == "DEQUEUE_CIRCULAR":
+            for i in range(len(data) - 1, -1, -1):
+                self.circular.push_depan(data[i])
+            pesan = f"Pembatalan dequeue: {len(data)} pesanan dikembalikan ke DEPAN antrean circular."
         else:  # DEQUEUE: kembalikan ke DEPAN antrean circular, urutan dijaga
             for i in range(len(data) - 1, -1, -1):
                 self.circular.push_depan(data[i])
@@ -425,7 +460,15 @@ class ManajerUndoRedo:
             if not self._naif_basi:
                 self.naif.enqueue(data)
             self.circular.enqueue(data)
-            pesan = f"Enqueue dikerjakan lagi: {data} masuk kembali ke belakang."
+            pesan = f"Enqueue dikerjakan lagi: {_nama(data)} masuk kembali ke belakang."
+        elif tipe == "DEQUEUE_NAIF":
+            for _ in range(len(data)):
+                self.naif.dequeue()
+            pesan = f"Dequeue dikerjakan lagi: {len(data)} pesanan keluar lagi dari antrean naif."
+        elif tipe == "DEQUEUE_CIRCULAR":
+            for _ in range(len(data)):
+                self.circular.dequeue()
+            pesan = f"Dequeue dikerjakan lagi: {len(data)} pesanan keluar lagi dari antrean circular."
         else:
             for _ in range(len(data)):
                 self.circular.dequeue()

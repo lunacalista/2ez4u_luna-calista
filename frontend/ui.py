@@ -1,0 +1,883 @@
+"""Antarmuka Tkinter: 2EZ4U Food Delivery.
+
+Satu jendela, tiga bagian: daftar menu di kiri, form + hasil di kanan,
+panel COMMAND di bawah (perintah yang sudah dijalankan beserta modul dan
+waktunya). Jalankan dari root repo:  python app.py
+
+Aturan proyek berlaku juga di sini: tanpa dict, set, sorted, .sort(),
+heapq, bisect, collections, maupun literal {} dan comprehension dict/set.
+"""
+import os
+import sys
+import time
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except ImportError:          # Python tanpa Tcl/Tk: Kontroler tetap bisa diuji
+    tk = None
+    ttk = None
+
+from backend.m1_pesanan import Array, LinkList, Pesanan, baca_csv, ukur
+from backend.m2_antrean import ManajerUndoRedo, proses_kasir, format_rupiah
+from backend.m3_laporan import (Pencacah, insertion_sort, merge_sort,
+                                linear_search, binary_search,
+                                bangun_indeks_oid, array_ke_list, ambil_awal,
+                                kunci_oid, kunci_harga, kunci_selesai)
+
+BATAS_TAMPIL = 200       # baris tabel yang ditampilkan paling banyak
+
+
+# ------------------------------------------------------------------
+# Pembantu format
+# ------------------------------------------------------------------
+def angka(n):
+    """1234567 -> '1.234.567'."""
+    negatif = n < 0
+    if negatif:
+        n = -n
+    s = str(n)
+    hasil = ""
+    hitung = 0
+    for i in range(len(s) - 1, -1, -1):
+        if hitung == 3:
+            hasil = "." + hasil
+            hitung = 0
+        hasil = s[i] + hasil
+        hitung += 1
+    if negatif:
+        return "-" + hasil
+    return hasil
+
+
+def fmt_ms(ms):
+    """Waktu dalam ms; operasi sangat cepat diberi lebih banyak desimal."""
+    if ms < 0.1:
+        return f"{ms:.3f}"
+    return f"{ms:.2f}"
+
+
+def jam(detik):
+    """Detik sejak 00:00 -> 'HH:MM:SS'; None -> '-'."""
+    if detik is None:
+        return "-"
+    detik = detik % 86400
+    h = detik // 3600
+    m = (detik % 3600) // 60
+    s = detik % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def detail(p):
+    """Satu pesanan sebagai daftar pasangan (kolom, isi)."""
+    return [("oid", p.oid), ("pelanggan", p.pelanggan), ("resto", p.resto),
+            ("menu", p.menu), ("harga", angka(p.harga)),
+            ("prioritas", str(p.prioritas)), ("masuk", jam(p.t_masuk)),
+            ("selesai", jam(p.t_selesai)), ("status", p.status)]
+
+
+def baris_pesanan(nomor, p):
+    return (str(nomor), p.oid, p.pelanggan, p.resto, p.menu, jam(p.t_masuk))
+
+
+KOLOM_PESANAN = ("#", "oid", "pelanggan", "resto", "menu", "masuk")
+
+
+class Hasil:
+    """Keluaran satu perintah, siap ditampilkan UI."""
+    def __init__(self, perintah, modul, ms, ringkas, kolom=None, baris=None):
+        self.perintah = perintah
+        self.modul = modul
+        self.ms = ms
+        self.ringkas = ringkas            # daftar teks
+        self.kolom = kolom if kolom is not None else ()
+        self.baris = baris if baris is not None else []
+
+
+# ------------------------------------------------------------------
+# Kontroler: menjembatani UI dengan backend. Tanpa Tkinter, jadi bisa diuji.
+# ------------------------------------------------------------------
+class Kontroler:
+    def __init__(self, path_csv=None):
+        if path_csv is None:
+            path_csv = os.path.join(_ROOT, "data", "pesanan.csv")
+        self.path_csv = path_csv
+        self.semua = None          # list Pesanan urutan file (untuk M3)
+        self.arr = None            # Array M1
+        self.ll = None             # LinkList M1
+        self.manajer = None        # antrean naif + melingkar + undo/redo (M2)
+        self.indeks_oid = None     # daftar terurut oid (dibangun sekali)
+        self.oid_berikut = 1
+
+    # ---- umum ----
+    def _perlu_data(self):
+        if self.semua is None:
+            raise ValueError("Data belum dimuat. Klik Load (menu DATA) dulu.")
+
+    def _int(self, teks, label, awal, akhir):
+        teks = teks.strip().replace(".", "").replace(",", "")
+        if teks == "":
+            raise ValueError(f"{label} harus diisi.")
+        try:
+            nilai = int(teks)
+        except ValueError:
+            raise ValueError(f"{label} harus berupa bilangan bulat.")
+        if nilai < awal or nilai > akhir:
+            raise ValueError(
+                f"{label} harus antara {angka(awal)} dan {angka(akhir)}.")
+        return nilai
+
+    def _baru(self, nama, prioritas):
+        nama = nama.strip()
+        if nama == "":
+            nama = "Pelanggan Baru"
+        p = Pesanan("O-%06d" % self.oid_berikut, nama, "kafe-teknik",
+                    "roti-bakar", 12000, prioritas, 28800, None, "ANTRE")
+        self.oid_berikut += 1
+        return p
+
+    # ---- DATA ----
+    def load(self):
+        if not os.path.exists(self.path_csv):
+            raise ValueError(f"File tidak ditemukan: {self.path_csv}")
+        awal = time.perf_counter()
+        sumber = baca_csv(self.path_csv)
+
+        t0 = time.perf_counter()
+        arr = Array()
+        for i in range(len(sumber)):
+            arr.tambah_reguler(sumber.get(i))
+        ms_arr = (time.perf_counter() - t0) * 1000
+
+        t0 = time.perf_counter()
+        ll = LinkList()
+        for i in range(len(sumber)):
+            ll.tambah_reguler(sumber.get(i))
+        ms_ll = (time.perf_counter() - t0) * 1000
+
+        semua = array_ke_list(sumber)
+        manajer = ManajerUndoRedo()
+        antre = 0
+        for p in semua:
+            if p.status == "ANTRE":
+                manajer.naif.enqueue(p)
+                manajer.circular.enqueue(p)
+                antre += 1
+
+        self.semua = semua
+        self.arr = arr
+        self.ll = ll
+        self.manajer = manajer
+        self.indeks_oid = None
+        self.oid_berikut = len(semua) + 1
+        total = (time.perf_counter() - awal) * 1000
+        return Hasil("load", "M1 - larik", total, [
+            f"{angka(len(semua))} pesanan dimuat dari data/pesanan.csv.",
+            f"Isi Array: {ms_arr:.2f} ms | isi LinkList: {ms_ll:.2f} ms "
+            "(keduanya lewat append, urutan file).",
+            f"{angka(antre)} pesanan berstatus ANTRE masuk ke kedua antrean (M2).",
+        ])
+
+    # ---- M1 ----
+    def _struktur(self, nama):
+        self._perlu_data()
+        if nama == "array":
+            return self.arr, "array", "ARRAY"
+        return self.ll, "linkedlist", "LINKEDLIST"
+
+    def _panjang(self):
+        return (f"Panjang sekarang: array {angka(len(self.arr))}, "
+                f"linkedlist {angka(len(self.ll))}.")
+
+    def m1_lihat(self, nama, teks):
+        s, kode, label = self._struktur(nama)
+        n = len(s)
+        if n == 0:
+            raise ValueError(f"{label} kosong.")
+        if teks.strip() == "":
+            idx = n // 2
+        else:
+            idx = self._int(teks, "Indeks", 0, n - 1)
+        p, ms = ukur(s.lihat_pesanan, idx)
+        return Hasil(f"{kode}_get", f"M1 - {kode}", ms,
+                     [f"Pesanan pada indeks {angka(idx)} dari {angka(n)} ({label})."],
+                     ("kolom", "isi"), detail(p))
+
+    def m1_tambah(self, nama, jenis, pelanggan):
+        s, kode, label = self._struktur(nama)
+        n = len(s)
+        if jenis == "reguler":
+            prioritas, pos, ket = 3, n, "paling belakang"
+        elif jenis == "prioritas":
+            prioritas, pos, ket = 2, n // 2, "ke tengah barisan"
+        else:
+            prioritas, pos, ket = 1, 0, "langsung ke urutan pertama"
+        p = self._baru(pelanggan, prioritas)
+        _, ms = ukur(getattr(s, "tambah_" + jenis), p)
+        return Hasil(f"{kode}_tambah_{jenis}", f"M1 - {kode}", ms,
+                     [f"{p.oid} masuk {ket} ({label}), indeks {angka(pos)}.",
+                      self._panjang()],
+                     ("kolom", "isi"), detail(p))
+
+    def m1_hapus(self, nama, teks):
+        s, kode, label = self._struktur(nama)
+        n = len(s)
+        if n == 0:
+            raise ValueError(f"{label} kosong.")
+        if teks.strip() == "":
+            idx = n // 2
+        else:
+            idx = self._int(teks, "Indeks", 0, n - 1)
+        p, ms = ukur(s.hapus_pesanan, idx)
+        return Hasil(f"{kode}_hapus", f"M1 - {kode}", ms,
+                     [f"{p.oid} dicabut dari indeks {angka(idx)} ({label}).",
+                      self._panjang()],
+                     ("kolom", "isi"), detail(p))
+
+    # ---- M2 ----
+    def postfix(self, teks):
+        if teks.strip() == "":
+            raise ValueError("Struk belanja belum diisi.")
+        (postfix, total, langkah), ms = ukur(proses_kasir, teks)
+        gabung = ""
+        for i in range(len(postfix)):
+            if i > 0:
+                gabung += " "
+            gabung += postfix[i]
+        return Hasil("stack_postfix", "M2 - stack", ms,
+                     [f"Struk : {teks.strip()}", f"Postfix: {gabung}",
+                      f"TOTAL : {format_rupiah(total)}"],
+                     ("langkah", "token", "tindakan", "stack", "output"),
+                     langkah)
+
+    def _ringkas_antrean(self):
+        m = self.manajer
+        return (f"Panjang antrean sekarang: naif {angka(m.naif.size())}, "
+                f"circular {angka(m.circular.size())}.")
+
+    def queue_enqueue(self, nama):
+        self._perlu_data()
+        m = self.manajer
+        p = self._baru(nama, 3)
+        _, ms = ukur(m.enqueue, p)
+        return Hasil("queue_enqueue", "M2 - queue", ms,
+                     [f"{p.oid} masuk paling belakang pada KEDUA antrean.",
+                      self._ringkas_antrean()],
+                     ("kolom", "isi"), detail(p))
+
+    def queue_dequeue(self, jenis, teks):
+        self._perlu_data()
+        m = self.manajer
+        antrean = m.naif if jenis == "naif" else m.circular
+        if antrean.size() == 0:
+            raise ValueError("Antrean kosong, tidak ada yang bisa dikeluarkan.")
+        k = self._int(teks, "Jumlah dequeue", 1, antrean.size())
+        if jenis == "naif":
+            g0 = m.naif.total_geseran
+            items, ms = m.dequeue_naif(k)
+            g = m.naif.total_geseran - g0
+            ringkas = [
+                f"{angka(k)} pesanan keluar dari depan antrean naif.",
+                f"Total {angka(g)} elemen digeser, rata-rata "
+                f"{angka(g // k)} geseran per dequeue.",
+                f"Sisa antrean naif {angka(m.naif.size())}.",
+            ]
+            modul = "M2 - queue naif"
+        else:
+            items, ms = m.dequeue_circular(k)
+            c = m.circular
+            ringkas = [
+                f"{angka(k)} pesanan keluar dari depan antrean circular.",
+                f"Tidak ada elemen yang digeser. front sekarang {angka(c.front)}, "
+                f"rear {angka(c.rear)}, kapasitas {angka(c.capacity)}.",
+                f"Sisa antrean circular {angka(c.size())}.",
+            ]
+            modul = "M2 - queue circular"
+        if k > BATAS_TAMPIL:
+            ringkas.append(f"(Menampilkan {BATAS_TAMPIL} pesanan pertama.)")
+        baris = []
+        for i in range(min(k, BATAS_TAMPIL)):
+            baris.append(baris_pesanan(i + 1, items[i]))
+        return Hasil(f"queue_dequeue_{jenis}", modul, ms, ringkas,
+                     KOLOM_PESANAN, baris)
+
+    def _undo_redo(self, jenis):
+        self._perlu_data()
+        m = self.manajer
+        tumpukan = m.undo_stack if jenis == "undo" else m.redo_stack
+        aksi = tumpukan.peek()
+        if jenis == "undo":
+            pesan, ms = ukur(m.undo_last)
+        else:
+            pesan, ms = ukur(m.redo_last)
+        baris = []
+        if aksi is not None:
+            data = aksi[1]
+            items = data if isinstance(data, list) else [data]
+            for i in range(min(len(items), BATAS_TAMPIL)):
+                p = items[i]
+                baris.append((str(i + 1), p.oid, p.pelanggan, p.resto, p.menu))
+        return Hasil(f"stack_{jenis}", "M2 - stack", ms,
+                     [pesan, self._ringkas_antrean() +
+                      f" Tumpukan undo {m.undo_stack.size()}, "
+                      f"redo {m.redo_stack.size()}."],
+                     ("#", "oid", "pelanggan", "resto", "menu"), baris)
+
+    def undo(self):
+        return self._undo_redo("undo")
+
+    def redo(self):
+        return self._undo_redo("redo")
+
+    # ---- M3 ----
+    def _kunci(self, nama):
+        nama = nama.strip().lower()
+        if nama == "oid":
+            return kunci_oid, "oid"
+        if nama == "harga":
+            return kunci_harga, "harga"
+        if nama == "selesai":
+            return kunci_selesai, "selesai"
+        raise ValueError("Kunci harus oid, harga, atau selesai.")
+
+    def m3_sort(self, algoritma, teks_n, nama_kunci):
+        self._perlu_data()
+        kunci, label = self._kunci(nama_kunci)
+        n = self._int(teks_n, "Jumlah baris", 1, len(self.semua))
+        data = ambil_awal(self.semua, n)
+        pc = Pencacah()
+        if algoritma == "insertion":
+            hasil, ms = ukur(insertion_sort, data, kunci, pc)
+            perintah, modul = "insertion_sort", "M3 - insertion sort"
+        else:
+            hasil, ms = ukur(merge_sort, data, kunci, pc)
+            perintah, modul = "merge_sort", "M3 - merge sort"
+        ringkas = [
+            f"{angka(n)} pesanan diurutkan menurut {label}.",
+            f"{angka(pc.perbandingan)} perbandingan, "
+            f"{angka(pc.pemindahan)} pemindahan.",
+        ]
+        if n > BATAS_TAMPIL:
+            ringkas.append(f"(Menampilkan {BATAS_TAMPIL} baris pertama.)")
+        baris = []
+        for i in range(min(n, BATAS_TAMPIL)):
+            p = hasil[i]
+            baris.append((str(i + 1), p.oid, angka(p.harga), jam(p.t_selesai),
+                          p.resto, p.menu))
+        return Hasil(perintah, modul, ms, ringkas,
+                     ("#", "oid", "harga", "selesai", "resto", "menu"), baris)
+
+    def m3_linear(self, teks):
+        self._perlu_data()
+        oid = teks.strip().upper()
+        if oid == "":
+            raise ValueError("Nomor pesanan (oid) harus diisi.")
+        pc = Pencacah()
+        idx, ms = ukur(linear_search, self.semua, oid, kunci_oid, pc)
+        return self._hasil_cari("linear_search", "M3 - linear search",
+                                self.semua, oid, idx, pc, ms, [])
+
+    def m3_binary(self, teks):
+        self._perlu_data()
+        oid = teks.strip().upper()
+        if oid == "":
+            raise ValueError("Nomor pesanan (oid) harus diisi.")
+        awal = []
+        if self.indeks_oid is None:
+            self.indeks_oid, ms_bangun = ukur(bangun_indeks_oid, self.semua)
+            awal.append("Daftar terurut oid dibangun sekali dengan merge sort, "
+                        f"{ms_bangun:.2f} ms.")
+        else:
+            awal.append("Memakai daftar terurut oid yang sudah dibangun.")
+        pc = Pencacah()
+        idx, ms = ukur(binary_search, self.indeks_oid, oid, kunci_oid, pc)
+        return self._hasil_cari("binary_search", "M3 - binary search",
+                                self.indeks_oid, oid, idx, pc, ms, awal)
+
+    def _hasil_cari(self, perintah, modul, larik, oid, idx, pc, ms, awal):
+        ringkas = list(awal)
+        if idx < 0:
+            ringkas.append(f"Pesanan {oid} tidak ditemukan.")
+            ringkas.append(f"{angka(pc.perbandingan)} perbandingan.")
+            return Hasil(perintah, modul, ms, ringkas)
+        if perintah == "linear_search":
+            ringkas.append(f"Ditemukan pada indeks {angka(idx)}.")
+        else:
+            ringkas.append(f"Ditemukan pada baris ke-{angka(idx + 1)} "
+                           f"dari {angka(len(larik))}.")
+        ringkas.append(f"{angka(pc.perbandingan)} perbandingan.")
+        return Hasil(perintah, modul, ms, ringkas, ("kolom", "isi"),
+                     detail(larik[idx]))
+
+
+# ------------------------------------------------------------------
+# Definisi menu
+# ------------------------------------------------------------------
+class Isian:
+    def __init__(self, label, awal="", tipe="entry", opsi=(), petunjuk=""):
+        self.label = label
+        self.awal = awal
+        self.tipe = tipe            # "entry" atau "combo"
+        self.opsi = opsi
+        self.petunjuk = petunjuk
+
+
+class Menu:
+    def __init__(self, grup, label, aksi, tetap, judul, sub, isian, tombol,
+                 catatan):
+        self.grup = grup
+        self.label = label
+        self.aksi = aksi            # nama method Kontroler
+        self.tetap = tetap          # argumen tetap di depan isian form
+        self.judul = judul
+        self.sub = sub
+        self.isian = isian
+        self.tombol = tombol
+        self.catatan = catatan
+
+
+def daftar_menu():
+    g_data = "DATA"
+    g1 = "M1 - DATA PESANAN"
+    g2 = "M2 - STACK DAN QUEUE"
+    g3 = "M3 - SORT DAN SEARCH"
+    nama = Isian("Nama pelanggan", "Pelanggan Baru",
+                 petunjuk="nama untuk pesanan yang akan dibuat")
+    idx = Isian("Indeks pesanan", "",
+                petunjuk="mulai dari 0; kosongkan untuk indeks tengah")
+    m = []
+    m.append(Menu(g_data, "Load", "load", (), "Data: muat pesanan.csv",
+                  "Membaca pesanan.csv ke Array, LinkList, dan kedua antrean. "
+                  "Lakukan sekali sebelum memakai menu lain.",
+                  [], "LOAD",
+                  "Array dan LinkList diisi dengan urutan file lewat append. "
+                  "Perhatikan selisih waktunya: LinkList harus membuat 200.000 simpul."))
+
+    for struktur, kode, nm in (("array", "ARRAY", "Array"),
+                               ("linkedlist", "LINKEDLIST", "Linked List")):
+        arr = (struktur == "array")
+        m.append(Menu(g1, f"{kode} - LIHAT PESANAN", "m1_lihat", (struktur,),
+                      f"{nm}: lihat pesanan ke-i",
+                      "Membuka detail satu pesanan berdasarkan indeksnya.",
+                      [idx], "LIHAT",
+                      "Array menghitung alamat indeks langsung, jadi O(1) "
+                      "berapa pun indeksnya." if arr else
+                      "Linked list tidak punya alamat untuk indeks ke-i. "
+                      "Harus menelusuri dari head, O(n)."))
+        m.append(Menu(g1, f"{kode} - TAMBAH PESANAN REGULER", "m1_tambah",
+                      (struktur, "reguler"),
+                      f"{nm}: pesanan REGULER, masuk paling belakang",
+                      "Pesanan reguler mengantre di ujung belakang barisan.",
+                      [nama], "TAMBAH",
+                      "O(1) amortized: array hanya sesekali menyalin ke petak "
+                      "baru saat kapasitas penuh." if arr else
+                      "O(1): penunjuk tail disimpan, jadi tidak perlu menelusuri."))
+        m.append(Menu(g1, f"{kode} - TAMBAH PESANAN PRIORITAS", "m1_tambah",
+                      (struktur, "prioritas"),
+                      f"{nm}: pesanan PRIORITAS, menyerobot ke tengah",
+                      "Pesanan prioritas disisipkan di tengah barisan (n // 2).",
+                      [nama], "TAMBAH",
+                      "O(n): array menggeser separuh isinya ke kanan." if arr else
+                      "O(n): linked list menelusuri separuh simpul lalu "
+                      "menyambung. Hampir seimbang dengan array, tapi sebabnya berbeda."))
+        m.append(Menu(g1, f"{kode} - TAMBAH PESANAN VIP", "m1_tambah",
+                      (struktur, "vip"),
+                      f"{nm}: pesanan VIP, langsung ke urutan pertama",
+                      "Pesanan VIP disisipkan di indeks 0.",
+                      [nama], "TAMBAH",
+                      "O(n): array harus menggeser seluruh isinya satu petak." if arr
+                      else "O(1): cukup mengubah penunjuk head. Inilah kekuatan linked list."))
+        m.append(Menu(g1, f"{kode} - HAPUS PESANAN", "m1_hapus", (struktur,),
+                      f"{nm}: hapus pesanan ke-i",
+                      "Mencabut satu pesanan dari barisan.",
+                      [idx], "HAPUS",
+                      "O(n): sisa isi digeser satu petak ke kiri." if arr else
+                      "O(n): menelusuri sampai simpul sebelum target lalu memutus sambungan."))
+
+    m.append(Menu(g2, "STACK - POSTFIX (MESIN KASIR)", "postfix", (),
+                  "Stack: hitung struk lewat postfix",
+                  "Struk ditulis infix, lalu dihitung dua tahap dengan stack: "
+                  "tahap 1 infix menjadi postfix, tahap 2 postfix dievaluasi.",
+                  [Isian("Struk belanja (infix)",
+                         "( 3 * 12000 ) + ( 2 * 8500 ) - 5000",
+                         petunjuk="angka, + - * / dan tanda kurung; "
+                                   "3 x Rp12.000 dan 2 x Rp8.500, potongan Rp5.000")],
+                  "HITUNG",
+                  "Baris 1.x adalah konversi, baris 2.x evaluasi. Tahap 1 menahan "
+                  "operator di stack sampai gilirannya tiba. Tahap 2 menumpuk "
+                  "angka, dan setiap operator mengambil dua nilai teratas. "
+                  "Operand kanan selalu keluar lebih dulu."))
+    m.append(Menu(g2, "STACK - UNDO", "undo", (),
+                  "Stack: batalkan aksi antrean terakhir",
+                  "Mengambil catatan teratas tumpukan undo, lalu menjalankan "
+                  "kebalikannya. Aksi terakhirlah yang dibatalkan lebih dulu.",
+                  [], "UNDO",
+                  "Kebalikan dari enqueue membuang elemen paling belakang (murah). "
+                  "Kebalikan dari dequeue mengembalikan seluruh daftar pesanan "
+                  "ke DEPAN antrean, bukan ke belakang."))
+    m.append(Menu(g2, "STACK - REDO", "redo", (),
+                  "Stack: kerjakan lagi aksi yang dibatalkan",
+                  "Mengambil catatan teratas tumpukan redo, lalu mengerjakan "
+                  "ulang aksi aslinya. Aksi baru mengosongkan tumpukan ini.",
+                  [], "REDO",
+                  "Redo mengerjakan ULANG aksi aslinya, bukan kebalikannya, lalu "
+                  "mengembalikan catatannya ke tumpukan undo supaya bisa dibatalkan lagi."))
+    m.append(Menu(g2, "QUEUE - ENQUEUE", "queue_enqueue", (),
+                  "Queue: pesanan baru masuk ke belakang",
+                  "Menambahkan pesanan di ujung belakang kedua antrean sekaligus, "
+                  "yang naif maupun yang circular.",
+                  [nama], "ENQUEUE",
+                  "Enqueue selalu menempel di belakang, jadi O(1) pada kedua versi. "
+                  "Perbedaannya baru muncul saat dequeue."))
+    jumlah = Isian("Berapa kali dequeue", "1",
+                   petunjuk="coba 1, lalu 10, lalu 100 untuk melihat bedanya")
+    m.append(Menu(g2, "QUEUE - DEQUEUE NAIF", "queue_dequeue", ("naif",),
+                  "Queue naif: ambil dari depan dengan menggeser isi",
+                  "Mengambil indeks 0 lalu menggeser seluruh sisa isi satu petak "
+                  "ke kiri. Biayanya O(n) setiap kali.",
+                  [jumlah], "DEQUEUE",
+                  "Mengambil indeks 0 memaksa seluruh sisa isi bergeser satu petak "
+                  "ke kiri, jadi O(n) per dequeue. Bandingkan waktunya dengan menu "
+                  "DEQUEUE CIRCULAR."))
+    m.append(Menu(g2, "QUEUE - DEQUEUE CIRCULAR", "queue_dequeue", ("circular",),
+                  "Queue circular: ambil dari depan dengan memajukan penunjuk",
+                  "Hanya penunjuk front yang maju, memakai sisa modulo terhadap "
+                  "kapasitas. Isi larik tidak digeser sama sekali.",
+                  [jumlah], "DEQUEUE",
+                  "Yang berpindah hanya penunjuk front, tidak ada elemen yang "
+                  "digeser, jadi O(1) berapa pun panjang antreannya."))
+
+    kunci_sort = Isian("Diurutkan menurut", "harga", "combo",
+                       ("oid", "harga", "selesai"),
+                       "oid (teks), harga (angka), selesai (waktu selesai)")
+    m.append(Menu(g3, "SORT - INSERTION SORT", "m3_sort", ("insertion",),
+                  "Sort: insertion sort, O(n²)",
+                  "Setiap elemen digeser mundur sampai menemukan tempatnya. "
+                  "Sederhana, tetapi kerjanya tumbuh kuadratik.",
+                  [Isian("Jumlah baris diurutkan", "1000",
+                         petunjuk="diambil dari awal data; coba 1.000 lalu "
+                                   "2.000 lalu 4.000"), kunci_sort],
+                  "URUTKAN",
+                  "Setiap elemen digeser mundur sampai menemukan tempatnya, jadi "
+                  "biayanya tumbuh kuadratik: melipatduakan jumlah baris membuat "
+                  "perbandingan naik sekitar empat kali. Batas 20.000 baris."))
+    m.append(Menu(g3, "SORT - MERGE SORT", "m3_sort", ("merge",),
+                  "Sort: merge sort, O(n log n)",
+                  "Larik dibelah dua terus-menerus, lalu potongan yang sudah "
+                  "terurut disatukan kembali.",
+                  [Isian("Jumlah baris diurutkan", "4000",
+                         petunjuk="coba juga 200.000 untuk seluruh data"),
+                   Isian("Diurutkan menurut", "oid", "combo",
+                         ("oid", "harga", "selesai"),
+                         "oid (teks), harga (angka), selesai (waktu selesai)")],
+                  "URUTKAN",
+                  "Larik dibelah dua sampai tersisa satu elemen, lalu digabung "
+                  "kembali. Kedalaman belahannya log n dan tiap tingkat memakai O(n), "
+                  "jadi O(n log n). Hasilnya sama persis dengan insertion sort karena "
+                  "keduanya stabil."))
+    cari = Isian("Nomor pesanan (oid)", "O-137442",
+                 petunjuk="format O-000001 sampai O-200000")
+    m.append(Menu(g3, "SEARCH - LINEAR SEARCH", "m3_linear", (),
+                  "Search: linear search, O(n)",
+                  "Memeriksa pesanan satu per satu dari depan. Tidak menuntut "
+                  "data terurut.",
+                  [cari], "CARI",
+                  "Data tidak perlu terurut, tetapi setiap pesanan diperiksa satu "
+                  "per satu dari depan. Kasus terburuk menyentuh seluruh 200.000 baris."))
+    m.append(Menu(g3, "SEARCH - BINARY SEARCH", "m3_binary", (),
+                  "Search: binary search, O(log n)",
+                  "Membuang separuh daftar pada setiap perbandingan. Menuntut "
+                  "daftar yang sudah terurut menurut oid.",
+                  [cari], "CARI",
+                  "Setiap perbandingan membuang separuh daftar, jadi 200.001 baris "
+                  "habis dalam paling banyak 18 langkah. Syaratnya daftar harus "
+                  "SUDAH terurut menurut kunci yang dicari; di sini terurut menurut oid."))
+    return m
+
+
+# ------------------------------------------------------------------
+# Jendela Tkinter
+# ------------------------------------------------------------------
+BIRU_TUA = "#1b2e4b"
+ABU_PANEL = "#f3f4f6"
+KUNING = "#fff4cc"
+FONT = ("Segoe UI", 9)
+FONT_TEBAL = ("Segoe UI", 9, "bold")
+FONT_JUDUL = ("Segoe UI", 12, "bold")
+FONT_KECIL = ("Segoe UI", 8)
+FONT_MONO = ("Consolas", 9)
+
+
+class AplikasiUI:
+    def __init__(self, root, kontroler):
+        self.root = root
+        self.k = kontroler
+        self.menu = daftar_menu()
+        self.tombol_menu = []
+        self.menu_aktif = None
+        self.vars = []
+        self.entri_pertama = None
+
+        root.title("2EZ4U Food Delivery")
+        root.geometry("1120x760")
+        root.minsize(900, 620)
+        gaya = ttk.Style()
+        try:
+            gaya.theme_use("clam")
+        except tk.TclError:
+            pass
+        gaya.configure("Treeview", rowheight=22, font=FONT_MONO)
+        gaya.configure("Treeview.Heading", font=FONT_TEBAL)
+
+        self._bangun_header()
+        self._bangun_bawah()
+        self._bangun_badan()
+        self._bangun_menu_kiri()
+        self.pilih(self.menu[0])
+
+    # ---- kerangka ----
+    def _bangun_header(self):
+        h = tk.Frame(self.root, bg=BIRU_TUA)
+        h.pack(side="top", fill="x")
+        tk.Label(h, text="2EZ4U Food Delivery", bg=BIRU_TUA, fg="white",
+                 font=("Segoe UI", 13, "bold"), padx=12, pady=8).pack(side="left")
+
+    def _bangun_bawah(self):
+        b = tk.Frame(self.root, bg="#e5e7eb")
+        b.pack(side="bottom", fill="x")
+        tk.Button(b, text="Tutup", command=self.root.destroy, bg=BIRU_TUA,
+                  fg="white", relief="flat", padx=14, font=FONT_TEBAL
+                  ).pack(side="left", padx=8, pady=6)
+        self.status = tk.StringVar(value="Siap. Klik Load untuk memuat data.")
+        tk.Label(b, textvariable=self.status, bg=BIRU_TUA, fg="white",
+                 font=FONT_MONO, padx=8, pady=3).pack(side="left", pady=6)
+
+    def _bangun_badan(self):
+        self.badan = tk.Frame(self.root)
+        self.badan.pack(side="top", fill="both", expand=True)
+        self.kiri = tk.Frame(self.badan, bg=ABU_PANEL, width=330)
+        self.kiri.pack(side="left", fill="y")
+        self.kiri.pack_propagate(False)
+        self.kanan = tk.Frame(self.badan, padx=14, pady=8)
+        self.kanan.pack(side="left", fill="both", expand=True)
+
+        self.judul = tk.Label(self.kanan, text="", font=FONT_JUDUL, anchor="w",
+                              justify="left")
+        self.judul.pack(fill="x")
+        self.sub = tk.Label(self.kanan, text="", font=FONT_KECIL, fg="#555",
+                            anchor="w", justify="left")
+        self.sub.pack(fill="x", pady=(0, 6))
+        self.form = tk.Frame(self.kanan)
+        self.form.pack(fill="x")
+        self.ringkas = tk.Label(self.kanan, text="", font=FONT, anchor="w",
+                                justify="left")
+        self.ringkas.pack(fill="x", pady=(8, 4))
+
+        kt = tk.Frame(self.kanan)
+        kt.pack(fill="both", expand=True)
+        self.tabel = ttk.Treeview(kt, show="headings")
+        sy = ttk.Scrollbar(kt, orient="vertical", command=self.tabel.yview)
+        sx = ttk.Scrollbar(kt, orient="horizontal", command=self.tabel.xview)
+        self.tabel.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
+        self.tabel.grid(row=0, column=0, sticky="nsew")
+        sy.grid(row=0, column=1, sticky="ns")
+        sx.grid(row=1, column=0, sticky="ew")
+        kt.grid_rowconfigure(0, weight=1)
+        kt.grid_columnconfigure(0, weight=1)
+
+        tk.Label(self.kanan, text="COMMAND", font=FONT_KECIL, fg="#555",
+                 anchor="w").pack(fill="x", pady=(8, 0))
+        kc = tk.Frame(self.kanan)
+        kc.pack(fill="x")
+        self.cmd = tk.Text(kc, height=6, font=FONT_MONO, state="disabled",
+                           bg="#fafafa", wrap="none")
+        sc = ttk.Scrollbar(kc, orient="vertical", command=self.cmd.yview)
+        self.cmd.configure(yscrollcommand=sc.set)
+        self.cmd.pack(side="left", fill="x", expand=True)
+        sc.pack(side="right", fill="y")
+
+        self.catatan = tk.Label(self.kanan, text="", font=FONT_KECIL,
+                                bg=KUNING, anchor="w", justify="left",
+                                padx=8, pady=6)
+        self.catatan.pack(fill="x", pady=(8, 0))
+        self.kanan.bind("<Configure>", self._atur_lebar)
+
+    def _atur_lebar(self, event):
+        lebar = max(300, event.width - 40)
+        self.sub.configure(wraplength=lebar)
+        self.ringkas.configure(wraplength=lebar)
+        self.catatan.configure(wraplength=lebar)
+
+    def _bangun_menu_kiri(self):
+        kanvas = tk.Canvas(self.kiri, bg=ABU_PANEL, highlightthickness=0)
+        sb = ttk.Scrollbar(self.kiri, orient="vertical", command=kanvas.yview)
+        kanvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        kanvas.pack(side="left", fill="both", expand=True)
+        dalam = tk.Frame(kanvas, bg=ABU_PANEL)
+        jendela = kanvas.create_window((0, 0), window=dalam, anchor="nw")
+        dalam.bind("<Configure>",
+                   lambda e: kanvas.configure(scrollregion=kanvas.bbox("all")))
+        kanvas.bind("<Configure>",
+                    lambda e: kanvas.itemconfigure(jendela, width=e.width))
+
+        def roda(event):
+            if event.num == 4:
+                kanvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                kanvas.yview_scroll(1, "units")
+            else:
+                kanvas.yview_scroll(int(-event.delta / 120), "units")
+
+        def masuk(_):
+            kanvas.bind_all("<MouseWheel>", roda)
+            kanvas.bind_all("<Button-4>", roda)
+            kanvas.bind_all("<Button-5>", roda)
+
+        def keluar(_):
+            kanvas.unbind_all("<MouseWheel>")
+            kanvas.unbind_all("<Button-4>")
+            kanvas.unbind_all("<Button-5>")
+
+        self.kiri.bind("<Enter>", masuk)
+        self.kiri.bind("<Leave>", keluar)
+
+        grup_terakhir = ""
+        for menu in self.menu:
+            if menu.grup != grup_terakhir:
+                tk.Label(dalam, text=menu.grup, bg=ABU_PANEL, fg="#555",
+                         font=FONT_KECIL, anchor="w").pack(
+                    fill="x", padx=8, pady=(10, 2))
+                grup_terakhir = menu.grup
+            tombol = tk.Button(dalam, text=menu.label, anchor="w", bg="white",
+                               activebackground="#e5edf8", relief="flat",
+                               bd=1, highlightthickness=1,
+                               highlightbackground="#d1d5db", font=FONT,
+                               padx=8, pady=2,
+                               command=lambda m=menu: self.pilih(m))
+            tombol.pack(fill="x", padx=8, pady=1)
+            self.tombol_menu.append((menu, tombol))
+
+    # ---- pilih menu & form ----
+    def pilih(self, menu):
+        self.menu_aktif = menu
+        for m, tombol in self.tombol_menu:
+            tombol.configure(bg="#cfe0f5" if m is menu else "white")
+        self.judul.configure(text=menu.judul)
+        self.sub.configure(text=menu.sub)
+        self.catatan.configure(text=menu.catatan)
+        self._bangun_form(menu)
+        self._bersihkan_hasil()
+
+    def _bangun_form(self, menu):
+        for w in self.form.winfo_children():
+            w.destroy()
+        self.vars = []
+        self.entri_pertama = None
+        kolom = 0
+        for isian in menu.isian:
+            tk.Label(self.form, text=isian.label, font=FONT_TEBAL,
+                     anchor="w").grid(row=0, column=kolom, sticky="w",
+                                      padx=(0, 12))
+            v = tk.StringVar(value=isian.awal)
+            if isian.tipe == "combo":
+                w = ttk.Combobox(self.form, textvariable=v, state="readonly",
+                                 values=isian.opsi, width=12)
+            else:
+                lebar = 46 if len(isian.awal) > 20 else 22
+                w = tk.Entry(self.form, textvariable=v, width=lebar,
+                             font=FONT)
+                w.bind("<Return>", lambda e: self.jalankan())
+                if self.entri_pertama is None:
+                    self.entri_pertama = w
+            w.grid(row=1, column=kolom, sticky="w", padx=(0, 12))
+            if isian.petunjuk != "":
+                tk.Label(self.form, text=isian.petunjuk, font=FONT_KECIL,
+                         fg="#666", anchor="w", justify="left",
+                         wraplength=330).grid(row=2, column=kolom,
+                                              sticky="w", padx=(0, 12))
+            self.vars.append(v)
+            kolom += 1
+        tk.Button(self.form, text=menu.tombol, command=self.jalankan,
+                  bg=BIRU_TUA, fg="white", relief="flat", padx=22, pady=4,
+                  font=FONT_TEBAL).grid(row=1, column=kolom, sticky="w")
+        if self.entri_pertama is not None:
+            self.entri_pertama.focus_set()
+
+    # ---- menjalankan ----
+    def jalankan(self):
+        menu = self.menu_aktif
+        nilai = []
+        for v in self.vars:
+            nilai.append(v.get())
+        self.status.set("memproses...")
+        self.root.configure(cursor="watch")
+        self.root.update_idletasks()
+        try:
+            hasil = getattr(self.k, menu.aksi)(*menu.tetap, *nilai)
+        except ValueError as galat:
+            self._tampilkan_galat(str(galat))
+            return
+        except Exception as galat:     # galat tak terduga: tampilkan, jangan crash
+            self._tampilkan_galat(f"Galat: {galat}")
+            return
+        finally:
+            self.root.configure(cursor="")
+        self._tampilkan(hasil)
+
+    def _bersihkan_hasil(self):
+        self.ringkas.configure(text="", fg="black")
+        self.tabel.delete(*self.tabel.get_children())
+
+    def _tampilkan_galat(self, pesan):
+        self._bersihkan_hasil()
+        self.ringkas.configure(text=pesan, fg="#b00020")
+        self.status.set("Ditolak.")
+
+    def _tampilkan(self, hasil):
+        self._bersihkan_hasil()
+        self.ringkas.configure(text="\n".join(hasil.ringkas), fg="black")
+        self._isi_tabel(hasil.kolom, hasil.baris)
+        self.status.set(f"[{hasil.modul}]  {fmt_ms(hasil.ms)} ms")
+        self._catat(hasil)
+
+    def _isi_tabel(self, kolom, baris):
+        self.tabel.configure(columns=kolom)
+        n = len(kolom)
+        for i in range(n):
+            lebar = len(kolom[i])
+            for r in range(min(len(baris), BATAS_TAMPIL)):
+                panjang = len(str(baris[r][i]))
+                if panjang > lebar:
+                    lebar = panjang
+            px = min(max(lebar * 8 + 24, 70), 420)
+            self.tabel.heading(kolom[i], text=kolom[i])
+            self.tabel.column(kolom[i], width=px, minwidth=50,
+                              stretch=(i == n - 1), anchor="w")
+        for r in baris:
+            self.tabel.insert("", "end", values=r)
+
+    def _catat(self, hasil):
+        teks = (f"{hasil.perintah:<24}-> {hasil.modul:<22}"
+                f"{fmt_ms(hasil.ms):>10} ms\n")
+        self.cmd.configure(state="normal")
+        self.cmd.insert("1.0", teks)
+        self.cmd.configure(state="disabled")
+
+
+def main():
+    if tk is None:
+        print("Tkinter tidak ditemukan. Pasang Python dengan komponen Tcl/Tk "
+              "(Windows: centang 'tcl/tk and IDLE' saat instalasi).")
+        return
+    root = tk.Tk()
+    AplikasiUI(root, Kontroler())
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()

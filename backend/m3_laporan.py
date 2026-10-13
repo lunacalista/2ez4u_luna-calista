@@ -84,9 +84,9 @@ def insertion_sort(A, kunci, pencacah=None, batas=BATAS_INSERTION):
         pencacah = Pencacah()
     n = len(A)
     if n > batas:
+        batas_teks = format(batas, ",").replace(",", ".")
         raise ValueError(
-            f"DITOLAK: batasnya {batas:,} baris, pakai merge sort untuk data penuh"
-            .replace(",", "."))
+            f"DITOLAK: batasnya {batas_teks} baris, pakai merge sort untuk data penuh")
 
     K = []
     for i in range(n):
