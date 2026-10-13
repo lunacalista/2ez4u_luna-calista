@@ -10,6 +10,8 @@ Aturan: tanpa dict, set, sorted, .sort(), heapq, bisect, collections.*.
 Larik yang dipakai adalah list Python biasa (larik primitif).
 """
 
+import time
+
 BATAS_INSERTION = 20000          # lebih besar dari ini ditolak, pakai merge sort
 BELUM_SELESAI = 10 ** 12         # kunci untuk pesanan tanpa waktu selesai
 
@@ -216,3 +218,61 @@ def bangun_indeks_oid(A, pencacah=None):
     tidak sah untuk binary search.
     """
     return merge_sort(A, kunci_oid, pencacah)
+
+
+# ------------------------------------------------------------------
+# Benchmark M3: insertion vs merge sort, linear vs binary search
+# Pakai:  python backend/m3_laporan.py [data/pesanan.csv]
+# Mencetak tabel n vs perbandingan (untuk README dan grafiknya).
+# Insertion sort dibatasi sampai 8.000 baris agar tidak terlalu lama.
+# ------------------------------------------------------------------
+def _ukur(fungsi, *args):
+    t0 = time.perf_counter()
+    hasil = fungsi(*args)
+    return hasil, (time.perf_counter() - t0) * 1000
+
+
+def benchmark(path="data/pesanan.csv"):
+    try:
+        from backend.m1_pesanan import baca_csv     # dari root repo
+    except ImportError:
+        from m1_pesanan import baca_csv             # langsung dari backend/
+
+    data = array_ke_list(baca_csv(path))
+    print(f"Data dimuat: {len(data)} baris\n")
+
+    print("SORT, kunci = harga")
+    print(f"{'n':>8}{'insertion cmp':>16}{'insertion ms':>14}"
+          f"{'merge cmp':>14}{'merge ms':>12}")
+    print("-" * 64)
+    for n in (1000, 2000, 4000, 8000):
+        pi = Pencacah()
+        _, ms_i = _ukur(insertion_sort, ambil_awal(data, n), kunci_harga, pi)
+        pm = Pencacah()
+        _, ms_m = _ukur(merge_sort, ambil_awal(data, n), kunci_harga, pm)
+        print(f"{n:>8}{pi.perbandingan:>16}{ms_i:>14.2f}"
+              f"{pm.perbandingan:>14}{ms_m:>12.2f}")
+
+    pm = Pencacah()
+    _, ms = _ukur(merge_sort, data, kunci_harga, pm)
+    print(f"\nMerge sort data penuh ({len(data)} baris, harga): "
+          f"{pm.perbandingan} perbandingan, {ms:.2f} ms")
+
+    target = data[len(data) - 2].oid
+    pl = Pencacah()
+    idx_l, ms_l = _ukur(linear_search, data, target, kunci_oid, pl)
+    p_bangun = Pencacah()
+    indeks, ms_bangun = _ukur(bangun_indeks_oid, data, p_bangun)
+    pb = Pencacah()
+    idx_b, ms_b = _ukur(binary_search, indeks, target, kunci_oid, pb)
+
+    print(f"\nSEARCH oid {target}")
+    print(f"  linear : indeks {idx_l} | {pl.perbandingan} perbandingan | {ms_l:.4f} ms")
+    print(f"  binary : baris  {idx_b} | {pb.perbandingan} perbandingan | {ms_b:.4f} ms")
+    print(f"  (ongkos sekali bayar: bangun daftar terurut oid dengan merge sort, "
+          f"{ms_bangun:.2f} ms)")
+
+
+if __name__ == "__main__":
+    import sys
+    benchmark(sys.argv[1] if len(sys.argv) > 1 else "data/pesanan.csv")

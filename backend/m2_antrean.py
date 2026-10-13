@@ -6,9 +6,9 @@ Stack dan AntreanNaif dibangun di atas Array milik M1.
 import time
 
 try:
-    from backend.m1_pesanan import Array      # dijalankan dari root repo
+    from backend.m1_pesanan import Array, baca_csv, ukur   # dari root repo
 except ImportError:
-    from m1_pesanan import Array              # dijalankan langsung dari backend/
+    from m1_pesanan import Array, baca_csv, ukur           # langsung dari backend/
 
 
 # ------------------------------------------------------------------
@@ -456,7 +456,7 @@ class ManajerUndoRedo:
         ]
 
 
-if __name__ == "__main__":
+def demo():
     print("=== 1. KASIR STACK ===")
     postfix, total, langkah = proses_kasir("( 3 * 12000 ) + ( 2 * 8500 ) - 5000")
     print("Postfix :", _gabung(postfix))
@@ -471,3 +471,68 @@ if __name__ == "__main__":
     print(m.undo_last())
     print(m.redo_last())
     print(m.stats())
+
+
+# ------------------------------------------------------------------
+# Benchmark M2: antrean naif vs melingkar, plus undo/redo
+# Pakai:  python backend/m2_antrean.py [data/pesanan.csv]
+# Antrean diisi pesanan berstatus ANTRE dari CSV. Hasilnya untuk README.
+# ------------------------------------------------------------------
+def _muat_antre(path):
+    """Mengambil oid pesanan berstatus ANTRE (urutan file)."""
+    semua = baca_csv(path)
+    antre = []
+    for i in range(len(semua)):
+        p = semua.get(i)
+        if p.status == "ANTRE":
+            antre.append(p.oid)
+    return antre
+
+
+def _manajer_baru(antre):
+    """Manajer segar; kedua antrean diisi data yang persis sama."""
+    m = ManajerUndoRedo()
+    for oid in antre:
+        m.naif.enqueue(oid)
+        m.circular.enqueue(oid)
+    return m
+
+
+def benchmark(path="data/pesanan.csv"):
+    antre = _muat_antre(path)
+    print(f"Pesanan ANTRE dimuat: {len(antre)}\n")
+
+    # enqueue: harus sama murahnya di kedua versi
+    m = _manajer_baru(antre)
+    _, ms_n = ukur(m.naif.enqueue, "O-BARU")
+    _, ms_c = ukur(m.circular.enqueue, "O-BARU")
+    print("ENQUEUE (1 pesanan)")
+    print(f"  naif {ms_n:.4f} ms | circular {ms_c:.4f} ms\n")
+
+    # dequeue: di sinilah selisihnya muncul
+    print(f"{'DEQUEUE n':<12}{'naif (ms)':>12}{'circular (ms)':>15}"
+          f"{'geseran naif':>16}{'geseran circ':>14}")
+    print("-" * 69)
+    for n in (1, 10, 100, 1000):
+        m = _manajer_baru(antre)
+        _, ms_naif, ms_circ = m.dequeue(n)
+        print(f"{n:<12}{ms_naif:>12.4f}{ms_circ:>15.4f}"
+              f"{m.naif.total_geseran:>16}{m.circular.total_geseran:>14}")
+
+    # undo / redo atas satu aksi DEQUEUE 100
+    m = _manajer_baru(antre)
+    m.dequeue(100)
+    _, ms_undo = ukur(m.undo_last)
+    _, ms_redo = ukur(m.redo_last)
+    print(f"\nUNDO dequeue 100: {ms_undo:.4f} ms | REDO: {ms_redo:.4f} ms "
+          "(hanya antrean circular)")
+    _, ms_sinkron = ukur(m.sinkron_naif)
+    print(f"Sinkron ulang antrean naif (bukan bagian undo): {ms_sinkron:.4f} ms")
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "demo":
+        demo()
+    else:
+        benchmark(sys.argv[1] if len(sys.argv) > 1 else "data/pesanan.csv")

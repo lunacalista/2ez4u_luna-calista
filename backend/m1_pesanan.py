@@ -267,3 +267,47 @@ def ukur(fungsi, *args):
     t0 = time.perf_counter()
     hasil = fungsi(*args)
     return hasil, (time.perf_counter() - t0) * 1000
+
+
+# ------------------------------------------------------------------
+# Benchmark M1: Array vs LinkList pada data CSV
+# Pakai:  python backend/m1_pesanan.py [data/pesanan.csv]
+# Hasilnya bisa disalin ke tabel di README.
+# ------------------------------------------------------------------
+def _pesanan_baru(prioritas):
+    return Pesanan("O-BARU", "Pelanggan Baru", "kafe-teknik", "roti-bakar",
+                   12000, prioritas, 0, None, "ANTRE")
+
+
+def _rata_rata(fungsi, ulang=5):
+    total = 0.0
+    for _ in range(ulang):
+        _, ms = ukur(fungsi)
+        total += ms
+    return total / ulang
+
+
+def benchmark(path="data/pesanan.csv"):
+    arr, ll, ms_a, ms_l = muat_ke_struktur(path)
+    print(f"Data dimuat: {len(arr)} baris | load Array {ms_a:.2f} ms | "
+          f"load LinkList {ms_l:.2f} ms\n")
+
+    kasus = (
+        ("Lihat tengah", lambda s: s.lihat_pesanan(len(s) // 2)),
+        ("Tambah REGULER", lambda s: s.tambah_reguler(_pesanan_baru(3))),
+        ("Tambah PRIORITAS", lambda s: s.tambah_prioritas(_pesanan_baru(2))),
+        ("Tambah VIP", lambda s: s.tambah_vip(_pesanan_baru(1))),
+        ("Hapus tengah", lambda s: s.hapus_pesanan(len(s) // 2)),
+    )
+
+    print(f"{'Operasi':<18}{'Array (ms)':>12}{'LinkList (ms)':>16}")
+    print("-" * 46)
+    for nama, op in kasus:
+        t_arr = _rata_rata(lambda: op(arr))
+        t_ll = _rata_rata(lambda: op(ll))
+        print(f"{nama:<18}{t_arr:>12.4f}{t_ll:>16.4f}")
+
+
+if __name__ == "__main__":
+    import sys
+    benchmark(sys.argv[1] if len(sys.argv) > 1 else "data/pesanan.csv")
