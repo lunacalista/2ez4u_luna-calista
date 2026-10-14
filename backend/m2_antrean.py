@@ -6,14 +6,12 @@ Stack dan AntreanNaif dibangun di atas Array milik M1.
 import time
 
 try:
-    from backend.m1_pesanan import Array, baca_csv, ukur   # dari root repo
+    from backend.m1_pesanan import Array, baca_csv   # dari root repo
 except ImportError:
-    from m1_pesanan import Array, baca_csv, ukur           # langsung dari backend/
+    from m1_pesanan import Array, baca_csv           # langsung dari backend/
 
 
-# ------------------------------------------------------------------
 # Stack (LIFO) di atas Array M1
-# ------------------------------------------------------------------
 class Stack:
     """Tumpukan (LIFO). push/pop di ujung Array, jadi keduanya O(1)."""
     def __init__(self):
@@ -50,9 +48,7 @@ class Stack:
         return s
 
 
-# ------------------------------------------------------------------
 # Antrean naif: Array biasa, dequeue menggeser seluruh sisa isi
-# ------------------------------------------------------------------
 class AntreanNaif:
     """Antrean naif. dequeue mengambil indeks 0 lalu menggeser sisa: O(n)."""
     def __init__(self):
@@ -90,9 +86,7 @@ class AntreanNaif:
         return self.data.size
 
 
-# ------------------------------------------------------------------
 # Antrean melingkar
-# ------------------------------------------------------------------
 class AntreanMelingkar:
     """Antrean melingkar. dequeue hanya memajukan front: O(1).
 
@@ -168,9 +162,7 @@ class AntreanMelingkar:
         return self.count
 
 
-# ------------------------------------------------------------------
 # Kasir: infix -> postfix -> total
-# ------------------------------------------------------------------
 def format_rupiah(n):
     negatif = n < 0
     if negatif:
@@ -195,6 +187,16 @@ def prioritas_operator(op):
     if op == '*' or op == '/':
         return 2
     return 0
+
+
+def _adalah_angka(token):
+    """True bila token hanya berisi digit 0-9 ASCII (str.isdigit() menerima '²')."""
+    if len(token) == 0:
+        return False
+    for c in token:
+        if c not in '0123456789':
+            return False
+    return True
 
 
 def pisah_token(ekspresi):
@@ -233,21 +235,33 @@ def ke_postfix(ekspresi, langkah=None):
 
     Bila `langkah` (list) diberikan, setiap token dicatat sebagai tuple
     (no, token, tindakan, isi_stack, keluaran) untuk tabel di UI.
+
+    Struktur infix divalidasi lewat penanda `butuh_operand`: setelah operator
+    atau "(" token berikutnya harus angka/"(", setelah angka atau ")" token
+    berikutnya harus operator/")". Tanpa ini, "2 3 +" lolos dan dihitung 5.
     """
     tokens = pisah_token(ekspresi)
     output = []
     op_stack = Stack()
     nomor = 0
+    butuh_operand = True
 
     for token in tokens:
         nomor += 1
-        if token.isdigit():
+        if _adalah_angka(token):
+            if not butuh_operand:
+                raise ValueError("Dua angka berurutan tanpa operator")
             output.append(token)
+            butuh_operand = False
             tindakan = "angka, langsung keluar"
         elif token == '(':
+            if not butuh_operand:
+                raise ValueError("Kurung buka tidak boleh langsung setelah angka atau kurung tutup")
             op_stack.push(token)
             tindakan = "push ("
         elif token == ')':
+            if butuh_operand:
+                raise ValueError("Kurung tutup tidak boleh setelah operator atau kurung buka")
             ketemu = False
             while not op_stack.is_empty():
                 atas = op_stack.pop()
@@ -259,6 +273,8 @@ def ke_postfix(ekspresi, langkah=None):
                 raise ValueError("Kurung tutup tanpa pasangan")
             tindakan = "pop sampai ( , buang ("
         elif token in ('+', '-', '*', '/'):
+            if butuh_operand:
+                raise ValueError("Operator tanpa operand di kirinya")
             ada_pop = False
             while (not op_stack.is_empty() and
                    op_stack.peek() != '(' and
@@ -266,6 +282,7 @@ def ke_postfix(ekspresi, langkah=None):
                 output.append(op_stack.pop())
                 ada_pop = True
             op_stack.push(token)
+            butuh_operand = True
             if ada_pop:
                 tindakan = "pop yang lebih/sama kuat, push " + token
             else:
@@ -276,6 +293,9 @@ def ke_postfix(ekspresi, langkah=None):
         if langkah is not None:
             langkah.append(("1." + str(nomor), token, tindakan,
                             op_stack.teks(), _gabung(output)))
+
+    if butuh_operand:
+        raise ValueError("Ekspresi kosong atau tidak lengkap")
 
     while not op_stack.is_empty():
         atas = op_stack.pop()
@@ -296,7 +316,7 @@ def hitung_postfix(postfix_tokens, langkah=None):
 
     for token in postfix_tokens:
         nomor += 1
-        if token.isdigit():
+        if _adalah_angka(token):
             val_stack.push(int(token))
             tindakan = "operand, push " + token
         else:
@@ -336,9 +356,7 @@ def proses_kasir(ekspresi):
     return postfix, total, langkah
 
 
-# ------------------------------------------------------------------
 # Manajer: aksi antrean + undo/redo, menjaga kedua antrean tetap sama
-# ------------------------------------------------------------------
 def _nama(item):
     """oid bila item adalah Pesanan, selain itu teksnya sendiri."""
     if hasattr(item, "oid"):
@@ -415,7 +433,13 @@ class ManajerUndoRedo:
         return items, ms
 
     def dequeue_naif(self, n=1):
-        """Mengeluarkan n pesanan hanya dari antrean NAIF. Mengembalikan (daftar, ms)."""
+        """Mengeluarkan n pesanan hanya dari antrean NAIF. Mengembalikan (daftar, ms).
+
+        sinkron_naif() dipanggil dulu: kalau naif basi (habis undo/redo DEQUEUE),
+        tanpa ini yang dikeluarkan adalah isi lama yang sudah tidak berlaku.
+        Sinkron di luar pengukuran waktu.
+        """
+        self.sinkron_naif()
         return self._dequeue_satu(self.naif, "DEQUEUE_NAIF", n)
 
     def dequeue_circular(self, n=1):
@@ -516,11 +540,7 @@ def demo():
     print(m.stats())
 
 
-# ------------------------------------------------------------------
-# Benchmark M2: antrean naif vs melingkar, plus undo/redo
-# Pakai:  python backend/m2_antrean.py [data/pesanan.csv]
-# Antrean diisi pesanan berstatus ANTRE dari CSV. Hasilnya untuk README.
-# ------------------------------------------------------------------
+# Pemuatan data: antrean diisi pesanan berstatus ANTRE dari CSV
 def _muat_antre(path):
     """Mengambil oid pesanan berstatus ANTRE (urutan file)."""
     semua = baca_csv(path)
@@ -541,41 +561,5 @@ def _manajer_baru(antre):
     return m
 
 
-def benchmark(path="data/pesanan.csv"):
-    antre = _muat_antre(path)
-    print(f"Pesanan ANTRE dimuat: {len(antre)}\n")
-
-    # enqueue: harus sama murahnya di kedua versi
-    m = _manajer_baru(antre)
-    _, ms_n = ukur(m.naif.enqueue, "O-BARU")
-    _, ms_c = ukur(m.circular.enqueue, "O-BARU")
-    print("ENQUEUE (1 pesanan)")
-    print(f"  naif {ms_n:.4f} ms | circular {ms_c:.4f} ms\n")
-
-    # dequeue: di sinilah selisihnya muncul
-    print(f"{'DEQUEUE n':<12}{'naif (ms)':>12}{'circular (ms)':>15}"
-          f"{'geseran naif':>16}{'geseran circ':>14}")
-    print("-" * 69)
-    for n in (1, 10, 100, 1000):
-        m = _manajer_baru(antre)
-        _, ms_naif, ms_circ = m.dequeue(n)
-        print(f"{n:<12}{ms_naif:>12.4f}{ms_circ:>15.4f}"
-              f"{m.naif.total_geseran:>16}{m.circular.total_geseran:>14}")
-
-    # undo / redo atas satu aksi DEQUEUE 100
-    m = _manajer_baru(antre)
-    m.dequeue(100)
-    _, ms_undo = ukur(m.undo_last)
-    _, ms_redo = ukur(m.redo_last)
-    print(f"\nUNDO dequeue 100: {ms_undo:.4f} ms | REDO: {ms_redo:.4f} ms "
-          "(hanya antrean circular)")
-    _, ms_sinkron = ukur(m.sinkron_naif)
-    print(f"Sinkron ulang antrean naif (bukan bagian undo): {ms_sinkron:.4f} ms")
-
-
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "demo":
-        demo()
-    else:
-        benchmark(sys.argv[1] if len(sys.argv) > 1 else "data/pesanan.csv")
+    demo()

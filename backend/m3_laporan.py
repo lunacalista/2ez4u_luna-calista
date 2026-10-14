@@ -7,10 +7,14 @@ Empat algoritma, masing-masing melaporkan jumlah perbandingan lewat Pencacah:
   binary_search   O(log n)   butuh data terurut menurut kunci yang dicari
 
 Aturan: tanpa dict, set, sorted, .sort(), heapq, bisect, collections.*.
-Larik yang dipakai adalah list Python biasa (larik primitif).
+Larik yang dipakai adalah list Python biasa (larik primitif). Data dari M1
+(Array berisi Pesanan) diubah dulu lewat array_ke_list().
 """
 
-import time
+try:
+    from backend.m1_pesanan import Pesanan, ukur    # dari root repo
+except ImportError:
+    from m1_pesanan import Pesanan, ukur            # langsung dari backend/
 
 BATAS_INSERTION = 20000          # lebih besar dari ini ditolak, pakai merge sort
 BELUM_SELESAI = 10 ** 12         # kunci untuk pesanan tanpa waktu selesai
@@ -31,9 +35,7 @@ class Pencacah:
         self.pemindahan = 0
 
 
-# ------------------------------------------------------------------
 # Fungsi kunci untuk objek Pesanan (M1)
-# ------------------------------------------------------------------
 def kunci_oid(p):
     return p.oid
 
@@ -43,15 +45,24 @@ def kunci_harga(p):
 
 
 def kunci_selesai(p):
-    """Waktu selesai; pesanan yang belum selesai ditaruh paling akhir."""
+    """Waktu selesai; pesanan yang belum selesai (None) ditaruh paling akhir."""
     if p.t_selesai is None:
         return BELUM_SELESAI
     return p.t_selesai
 
 
-# ------------------------------------------------------------------
+def ambil_kunci(nama):
+    """Nama kunci dari menu UI ("oid" / "harga" / "selesai") -> fungsi kunci."""
+    if nama == "oid":
+        return kunci_oid
+    if nama == "harga":
+        return kunci_harga
+    if nama == "selesai":
+        return kunci_selesai
+    raise ValueError("Kunci tidak dikenal: " + str(nama))
+
+
 # Pembantu data
-# ------------------------------------------------------------------
 def array_ke_list(arr):
     """Array M1 (atau apa pun yang punya len dan get) -> list biasa."""
     hasil = []
@@ -62,6 +73,8 @@ def array_ke_list(arr):
 
 def ambil_awal(A, n):
     """Salinan n elemen pertama, supaya larik asli tidak ikut terurut."""
+    if n < 0:
+        n = 0
     if n > len(A):
         n = len(A)
     hasil = []
@@ -70,14 +83,12 @@ def ambil_awal(A, n):
     return hasil
 
 
-# ------------------------------------------------------------------
 # Sorting
-# ------------------------------------------------------------------
 def insertion_sort(A, kunci, pencacah=None, batas=BATAS_INSERTION):
     """Mengurutkan A DI TEMPAT, stabil, O(n^2).
 
     Stabil karena menggeser hanya bila kunci kiri LEBIH BESAR (>), bukan >=.
-    pemindahan = jumlah geseran + satu penempatan untuk tiap elemen.
+    pemindahan = jumlah geseran + satu penempatan untuk tiap elemen (indeks 1..n-1).
     Menolak data lebih dari `batas` (ValueError) supaya aplikasi tidak membeku.
     """
     if pencacah is None:
@@ -111,7 +122,7 @@ def insertion_sort(A, kunci, pencacah=None, batas=BATAS_INSERTION):
     return A
 
 
-def _gabung(A, K, tA, tK, lo, mid, hi, pencacah):
+def _gabung_larik(A, K, tA, tK, lo, mid, hi, pencacah):
     """Menggabungkan A[lo:mid] dan A[mid:hi] yang masing-masing sudah terurut."""
     i = lo
     j = mid
@@ -151,7 +162,7 @@ def _urut(A, K, tA, tK, lo, hi, pencacah):
     mid = (lo + hi) // 2
     _urut(A, K, tA, tK, lo, mid, pencacah)
     _urut(A, K, tA, tK, mid, hi, pencacah)
-    _gabung(A, K, tA, tK, lo, mid, hi, pencacah)
+    _gabung_larik(A, K, tA, tK, lo, mid, hi, pencacah)
 
 
 def merge_sort(A, kunci, pencacah=None):
@@ -170,9 +181,7 @@ def merge_sort(A, kunci, pencacah=None):
     return hasil
 
 
-# ------------------------------------------------------------------
 # Searching
-# ------------------------------------------------------------------
 def linear_search(A, target, kunci=None, pencacah=None):
     """Menelusuri satu per satu. Mengembalikan indeks, atau -1 bila tidak ada.
 
@@ -221,58 +230,67 @@ def bangun_indeks_oid(A, pencacah=None):
 
 
 # ------------------------------------------------------------------
-# Benchmark M3: insertion vs merge sort, linear vs binary search
-# Pakai:  python backend/m3_laporan.py [data/pesanan.csv]
-# Mencetak tabel n vs perbandingan (untuk README dan grafiknya).
-# Insertion sort dibatasi sampai 8.000 baris agar tidak terlalu lama.
+# Pembungkus untuk UI: hasil + pencacah + waktu (ms, lewat ukur() milik M1)
 # ------------------------------------------------------------------
-def _ukur(fungsi, *args):
-    t0 = time.perf_counter()
-    hasil = fungsi(*args)
-    return hasil, (time.perf_counter() - t0) * 1000
+def jalankan_sort(data, jumlah, nama_kunci, metode):
+    """Mengurutkan `jumlah` baris pertama `data` (list Pesanan), data asli utuh.
+
+    metode: "insertion" atau "merge". Mengembalikan (hasil, pencacah, ms).
+    insertion_sort melempar ValueError bila jumlah melebihi batasnya.
+    """
+    kunci = ambil_kunci(nama_kunci)
+    salinan = ambil_awal(data, jumlah)
+    pencacah = Pencacah()
+    if metode == "insertion":
+        hasil, ms = ukur(insertion_sort, salinan, kunci, pencacah)
+    elif metode == "merge":
+        hasil, ms = ukur(merge_sort, salinan, kunci, pencacah)
+    else:
+        raise ValueError("Metode sort tidak dikenal: " + str(metode))
+    return hasil, pencacah, ms
 
 
-def benchmark(path="data/pesanan.csv"):
-    try:
-        from backend.m1_pesanan import baca_csv     # dari root repo
-    except ImportError:
-        from m1_pesanan import baca_csv             # langsung dari backend/
+def jalankan_cari(A, target, metode, kunci=None):
+    """metode: "linear" atau "binary". Mengembalikan (indeks, pencacah, ms).
 
-    data = array_ke_list(baca_csv(path))
-    print(f"Data dimuat: {len(data)} baris\n")
+    Untuk "binary", A harus sudah terurut menurut kunci yang dicari
+    (mis. hasil bangun_indeks_oid untuk pencarian oid).
+    """
+    pencacah = Pencacah()
+    if metode == "linear":
+        indeks, ms = ukur(linear_search, A, target, kunci, pencacah)
+    elif metode == "binary":
+        indeks, ms = ukur(binary_search, A, target, kunci, pencacah)
+    else:
+        raise ValueError("Metode cari tidak dikenal: " + str(metode))
+    return indeks, pencacah, ms
 
-    print("SORT, kunci = harga")
-    print(f"{'n':>8}{'insertion cmp':>16}{'insertion ms':>14}"
-          f"{'merge cmp':>14}{'merge ms':>12}")
-    print("-" * 64)
-    for n in (1000, 2000, 4000, 8000):
-        pi = Pencacah()
-        _, ms_i = _ukur(insertion_sort, ambil_awal(data, n), kunci_harga, pi)
-        pm = Pencacah()
-        _, ms_m = _ukur(merge_sort, ambil_awal(data, n), kunci_harga, pm)
-        print(f"{n:>8}{pi.perbandingan:>16}{ms_i:>14.2f}"
-              f"{pm.perbandingan:>14}{ms_m:>12.2f}")
 
-    pm = Pencacah()
-    _, ms = _ukur(merge_sort, data, kunci_harga, pm)
-    print(f"\nMerge sort data penuh ({len(data)} baris, harga): "
-          f"{pm.perbandingan} perbandingan, {ms:.2f} ms")
+def demo():
+    data = [
+        Pesanan("O-000001", "A", "kafe-teknik", "roti-bakar", 12000, 3, 100, None, "CANCEL"),
+        Pesanan("O-000002", "B", "kedai-kopi", "bubur-ayam", 11000, 3, 200, 17000, "DONE"),
+        Pesanan("O-000003", "C", "warung-bu-ida", "mie-goreng", 13000, 3, 300, 12000, "DONE"),
+        Pesanan("O-000004", "D", "kafe-teknik", "nasi-padang", 25000, 2, 400, None, "CANCEL"),
+        Pesanan("O-000005", "E", "kedai-kopi", "iga-penyet", 11000, 3, 500, 9000, "DONE"),
+    ]
 
-    target = data[len(data) - 2].oid
-    pl = Pencacah()
-    idx_l, ms_l = _ukur(linear_search, data, target, kunci_oid, pl)
-    p_bangun = Pencacah()
-    indeks, ms_bangun = _ukur(bangun_indeks_oid, data, p_bangun)
-    pb = Pencacah()
-    idx_b, ms_b = _ukur(binary_search, indeks, target, kunci_oid, pb)
+    print("=== 1. SORT (kunci = harga; stabil: O-000002 sebelum O-000005) ===")
+    for metode in ("insertion", "merge"):
+        hasil, pc, ms = jalankan_sort(data, 5, "harga", metode)
+        urutan = ""
+        for p in hasil:
+            urutan += p.oid + " "
+        print(f"{metode:<10}: {urutan}| {pc.perbandingan} perbandingan, "
+              f"{pc.pemindahan} pemindahan")
 
-    print(f"\nSEARCH oid {target}")
-    print(f"  linear : indeks {idx_l} | {pl.perbandingan} perbandingan | {ms_l:.4f} ms")
-    print(f"  binary : baris  {idx_b} | {pb.perbandingan} perbandingan | {ms_b:.4f} ms")
-    print(f"  (ongkos sekali bayar: bangun daftar terurut oid dengan merge sort, "
-          f"{ms_bangun:.2f} ms)")
+    print("\n=== 2. SEARCH oid O-000004 ===")
+    idx, pc, ms = jalankan_cari(data, "O-000004", "linear", kunci_oid)
+    print(f"linear : indeks {idx} | {pc.perbandingan} perbandingan")
+    indeks = bangun_indeks_oid(data)
+    idx, pc, ms = jalankan_cari(indeks, "O-000004", "binary", kunci_oid)
+    print(f"binary : indeks {idx} | {pc.perbandingan} perbandingan")
 
 
 if __name__ == "__main__":
-    import sys
-    benchmark(sys.argv[1] if len(sys.argv) > 1 else "data/pesanan.csv")
+    demo()

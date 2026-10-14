@@ -11,7 +11,18 @@ import os
 import sys
 import time
 
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+def _cari_root():
+    """Folder root repo: yang berisi data/pesanan.csv. Dicoba induk folder ui.py
+    (ui.py di frontend/), folder ui.py sendiri, lalu folder kerja saat ini."""
+    sini = os.path.dirname(os.path.abspath(__file__))
+    for kandidat in (os.path.join(sini, ".."), sini, os.getcwd()):
+        kandidat = os.path.abspath(kandidat)
+        if os.path.exists(os.path.join(kandidat, "data", "pesanan.csv")):
+            return kandidat
+    return os.path.abspath(os.path.join(sini, ".."))
+
+
+_ROOT = _cari_root()
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
@@ -24,17 +35,13 @@ except ImportError:          # Python tanpa Tcl/Tk: Kontroler tetap bisa diuji
 
 from backend.m1_pesanan import Array, LinkList, Pesanan, baca_csv, ukur
 from backend.m2_antrean import ManajerUndoRedo, proses_kasir, format_rupiah
-from backend.m3_laporan import (Pencacah, insertion_sort, merge_sort,
-                                linear_search, binary_search,
-                                bangun_indeks_oid, array_ke_list, ambil_awal,
-                                kunci_oid, kunci_harga, kunci_selesai)
+from backend.m3_laporan import (jalankan_sort, jalankan_cari,
+                                bangun_indeks_oid, array_ke_list, kunci_oid)
 
 BATAS_TAMPIL = 200       # baris tabel yang ditampilkan paling banyak
 
 
-# ------------------------------------------------------------------
 # Pembantu format
-# ------------------------------------------------------------------
 def angka(n):
     """1234567 -> '1.234.567'."""
     negatif = n < 0
@@ -98,9 +105,7 @@ class Hasil:
         self.baris = baris if baris is not None else []
 
 
-# ------------------------------------------------------------------
 # Kontroler: menjembatani UI dengan backend. Tanpa Tkinter, jadi bisa diuji.
-# ------------------------------------------------------------------
 class Kontroler:
     def __init__(self, path_csv=None):
         if path_csv is None:
@@ -113,7 +118,7 @@ class Kontroler:
         self.indeks_oid = None     # daftar terurut oid (dibangun sekali)
         self.oid_berikut = 1
 
-    # ---- umum ----
+    # umum
     def _perlu_data(self):
         if self.semua is None:
             raise ValueError("Data belum dimuat. Klik Load (menu DATA) dulu.")
@@ -140,7 +145,7 @@ class Kontroler:
         self.oid_berikut += 1
         return p
 
-    # ---- DATA ----
+    # DATA
     def load(self):
         if not os.path.exists(self.path_csv):
             raise ValueError(f"File tidak ditemukan: {self.path_csv}")
@@ -182,7 +187,7 @@ class Kontroler:
             f"{angka(antre)} pesanan berstatus ANTRE masuk ke kedua antrean (M2).",
         ])
 
-    # ---- M1 ----
+    # M1
     def _struktur(self, nama):
         self._perlu_data()
         if nama == "array":
@@ -238,7 +243,7 @@ class Kontroler:
                       self._panjang()],
                      ("kolom", "isi"), detail(p))
 
-    # ---- M2 ----
+    # M2
     def postfix(self, teks):
         if teks.strip() == "":
             raise ValueError("Struk belanja belum diisi.")
@@ -256,6 +261,7 @@ class Kontroler:
 
     def _ringkas_antrean(self):
         m = self.manajer
+        m.sinkron_naif()     # naif bisa basi sesudah undo/redo DEQUEUE gabungan
         return (f"Panjang antrean sekarang: naif {angka(m.naif.size())}, "
                 f"circular {angka(m.circular.size())}.")
 
@@ -272,6 +278,7 @@ class Kontroler:
     def queue_dequeue(self, jenis, teks):
         self._perlu_data()
         m = self.manajer
+        m.sinkron_naif()     # ukuran naif harus yang terbaru sebelum divalidasi
         antrean = m.naif if jenis == "naif" else m.circular
         if antrean.size() == 0:
             raise ValueError("Antrean kosong, tidak ada yang bisa dikeluarkan.")
@@ -279,28 +286,30 @@ class Kontroler:
         if jenis == "naif":
             g0 = m.naif.total_geseran
             items, ms = m.dequeue_naif(k)
+            jml = len(items)
             g = m.naif.total_geseran - g0
             ringkas = [
-                f"{angka(k)} pesanan keluar dari depan antrean naif.",
+                f"{angka(jml)} pesanan keluar dari depan antrean naif.",
                 f"Total {angka(g)} elemen digeser, rata-rata "
-                f"{angka(g // k)} geseran per dequeue.",
+                f"{angka(g // jml)} geseran per dequeue.",
                 f"Sisa antrean naif {angka(m.naif.size())}.",
             ]
             modul = "M2 - queue naif"
         else:
             items, ms = m.dequeue_circular(k)
+            jml = len(items)
             c = m.circular
             ringkas = [
-                f"{angka(k)} pesanan keluar dari depan antrean circular.",
+                f"{angka(jml)} pesanan keluar dari depan antrean circular.",
                 f"Tidak ada elemen yang digeser. front sekarang {angka(c.front)}, "
                 f"rear {angka(c.rear)}, kapasitas {angka(c.capacity)}.",
                 f"Sisa antrean circular {angka(c.size())}.",
             ]
             modul = "M2 - queue circular"
-        if k > BATAS_TAMPIL:
+        if jml > BATAS_TAMPIL:
             ringkas.append(f"(Menampilkan {BATAS_TAMPIL} pesanan pertama.)")
         baris = []
-        for i in range(min(k, BATAS_TAMPIL)):
+        for i in range(min(jml, BATAS_TAMPIL)):
             baris.append(baris_pesanan(i + 1, items[i]))
         return Hasil(f"queue_dequeue_{jenis}", modul, ms, ringkas,
                      KOLOM_PESANAN, baris)
@@ -333,28 +342,18 @@ class Kontroler:
     def redo(self):
         return self._undo_redo("redo")
 
-    # ---- M3 ----
-    def _kunci(self, nama):
-        nama = nama.strip().lower()
-        if nama == "oid":
-            return kunci_oid, "oid"
-        if nama == "harga":
-            return kunci_harga, "harga"
-        if nama == "selesai":
-            return kunci_selesai, "selesai"
-        raise ValueError("Kunci harus oid, harga, atau selesai.")
-
+    # M3
     def m3_sort(self, algoritma, teks_n, nama_kunci):
         self._perlu_data()
-        kunci, label = self._kunci(nama_kunci)
+        label = nama_kunci.strip().lower()
         n = self._int(teks_n, "Jumlah baris", 1, len(self.semua))
-        data = ambil_awal(self.semua, n)
-        pc = Pencacah()
+        if label != "oid" and label != "harga" and label != "selesai":
+            raise ValueError("Kunci harus oid, harga, atau selesai.")
+        # insertion_sort melempar ValueError("DITOLAK: ...") bila n terlalu besar
+        hasil, pc, ms = jalankan_sort(self.semua, n, label, algoritma)
         if algoritma == "insertion":
-            hasil, ms = ukur(insertion_sort, data, kunci, pc)
             perintah, modul = "insertion_sort", "M3 - insertion sort"
         else:
-            hasil, ms = ukur(merge_sort, data, kunci, pc)
             perintah, modul = "merge_sort", "M3 - merge sort"
         ringkas = [
             f"{angka(n)} pesanan diurutkan menurut {label}.",
@@ -376,8 +375,7 @@ class Kontroler:
         oid = teks.strip().upper()
         if oid == "":
             raise ValueError("Nomor pesanan (oid) harus diisi.")
-        pc = Pencacah()
-        idx, ms = ukur(linear_search, self.semua, oid, kunci_oid, pc)
+        idx, pc, ms = jalankan_cari(self.semua, oid, "linear", kunci_oid)
         return self._hasil_cari("linear_search", "M3 - linear search",
                                 self.semua, oid, idx, pc, ms, [])
 
@@ -393,8 +391,7 @@ class Kontroler:
                         f"{ms_bangun:.2f} ms.")
         else:
             awal.append("Memakai daftar terurut oid yang sudah dibangun.")
-        pc = Pencacah()
-        idx, ms = ukur(binary_search, self.indeks_oid, oid, kunci_oid, pc)
+        idx, pc, ms = jalankan_cari(self.indeks_oid, oid, "binary", kunci_oid)
         return self._hasil_cari("binary_search", "M3 - binary search",
                                 self.indeks_oid, oid, idx, pc, ms, awal)
 
@@ -414,9 +411,7 @@ class Kontroler:
                      detail(larik[idx]))
 
 
-# ------------------------------------------------------------------
 # Definisi menu
-# ------------------------------------------------------------------
 class Isian:
     def __init__(self, label, awal="", tipe="entry", opsi=(), petunjuk=""):
         self.label = label
@@ -599,9 +594,7 @@ def daftar_menu():
     return m
 
 
-# ------------------------------------------------------------------
 # Jendela Tkinter
-# ------------------------------------------------------------------
 BIRU_TUA = "#1b2e4b"
 ABU_PANEL = "#f3f4f6"
 KUNING = "#fff4cc"
@@ -762,7 +755,7 @@ class AplikasiUI:
             tombol.pack(fill="x", padx=8, pady=1)
             self.tombol_menu.append((menu, tombol))
 
-    # ---- pilih menu & form ----
+    # pilih menu & form
     def pilih(self, menu):
         self.menu_aktif = menu
         for m, tombol in self.tombol_menu:
@@ -808,7 +801,7 @@ class AplikasiUI:
         if self.entri_pertama is not None:
             self.entri_pertama.focus_set()
 
-    # ---- menjalankan ----
+    # menjalankan
     def jalankan(self):
         menu = self.menu_aktif
         nilai = []
