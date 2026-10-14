@@ -80,7 +80,7 @@ class Array:
         self.size -= 1
         return item
 
-    # ---- Operasi bisnis M1 (nama seragam dengan LinkList) ----
+    # Operasi bisnis M1 (nama seragam dengan LinkList)
     def tambah_reguler(self, pesanan):
         """REGULER: paling belakang."""
         self.append(pesanan)
@@ -189,7 +189,7 @@ class LinkList:
         self.size -= 1
         return val
 
-    # ---- Operasi bisnis M1 ----
+    # Operasi bisnis M1
     def tambah_reguler(self, pesanan):
         self.append(pesanan)
 
@@ -208,10 +208,7 @@ class LinkList:
     def __len__(self):
         return self.size
 
-
-# ------------------------------------------------------------------
 # Pemuatan data & pengukuran waktu
-# ------------------------------------------------------------------
 def _ke_int_atau_none(teks):
     teks = teks.strip()
     if teks == "":
@@ -268,12 +265,7 @@ def ukur(fungsi, *args):
     hasil = fungsi(*args)
     return hasil, (time.perf_counter() - t0) * 1000
 
-
-# ------------------------------------------------------------------
 # Benchmark M1: Array vs LinkList pada data CSV
-# Pakai:  python backend/m1_pesanan.py [data/pesanan.csv]
-# Hasilnya bisa disalin ke tabel di README.
-# ------------------------------------------------------------------
 def _pesanan_baru(prioritas):
     return Pesanan("O-BARU", "Pelanggan Baru", "kafe-teknik", "roti-bakar",
                    12000, prioritas, 0, None, "ANTRE")
