@@ -7,7 +7,7 @@ Aturan proyek: tanpa `dict`, `set`, `sorted`, `.sort()`, `heapq`, `bisect`, `col
 
 Data uji: `data/pesanan.csv` (200.000 pesanan).
 
-> Nama / NRP: _Luna Calista Azalia Zahra / 5024251112_
+> Nama / NRP: Luna Calista Azalia Zahra / 5024251112
 
 ## Struktur Repo
 
