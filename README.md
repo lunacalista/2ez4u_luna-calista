@@ -210,9 +210,7 @@ Catatan:
 - M1: kosongkan isian indeks agar aplikasi memakai indeks tengah (yang diukur di tabel). Tambah dan hapus mengubah panjang struktur, jadi klik **Load** lagi bila ingin kembali ke 200.000 baris.
 - M2: setiap dequeue mengurangi isi antrean, sehingga jumlah geseran naif hanya cocok dengan tabel bila antrean masih berisi 19.850 pesanan. Klik **Load** ulang (atau `STACK - UNDO`) sebelum mencoba n berikutnya.
 
-## Screenshot dan Demo
-
-**Demo video:** 
+## Screenshot Demo
 
 **Screenshot:**
 
