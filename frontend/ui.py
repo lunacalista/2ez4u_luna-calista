@@ -29,7 +29,7 @@ if _ROOT not in sys.path:
 try:
     import tkinter as tk
     from tkinter import ttk
-except ImportError:          # Python tanpa Tcl/Tk: Kontroler tetap bisa diuji
+except ImportError:          
     tk = None
     ttk = None
 
@@ -38,7 +38,7 @@ from backend.m2_antrean import ManajerUndoRedo, proses_kasir, format_rupiah
 from backend.m3_laporan import (jalankan_sort, jalankan_cari,
                                 bangun_indeks_oid, array_ke_list, kunci_oid)
 
-BATAS_TAMPIL = 200       # baris tabel yang ditampilkan paling banyak
+BATAS_TAMPIL = 200000    # baris tabel yang ditampilkan paling banyak (200000 = semua)
 
 
 # Pembantu format
@@ -594,15 +594,123 @@ def daftar_menu():
     return m
 
 
-# Jendela Tkinter
-BIRU_TUA = "#1b2e4b"
-ABU_PANEL = "#f3f4f6"
-KUNING = "#fff4cc"
-FONT = ("Segoe UI", 9)
-FONT_TEBAL = ("Segoe UI", 9, "bold")
-FONT_JUDUL = ("Segoe UI", 12, "bold")
-FONT_KECIL = ("Segoe UI", 8)
-FONT_MONO = ("Consolas", 9)
+# ======================================================================
+# Jendela Tkinter (tema ungu)
+# Hanya urusan tampilan. Logikanya ada di Kontroler di atas.
+# ======================================================================
+UNGU = "#8b4aa8"          # ungu sedang (warna badan): tombol dan aksen utama
+UNGU_TUA = "#2a2561"      # biru malam (warna surai): teks judul tabel, header
+UNGU_HOVER = "#763a92"
+PINK = "#d9418c"          # magenta (garis surai): aksen kecil
+LILAC = "#c9a7e0"         # lavender muda: scrollbar, hiasan
+LAVENDER = "#f7f1fb"      # latar jendela
+PANEL = "#ecdff6"         # latar menu kiri dan bar bawah
+GARIS = "#dac6ec"
+KARTU = "#ffffff"
+HOVER_MENU = "#f4eafa"
+TEKS = "#241f5a"
+TEKS_REDUP = "#7a6a95"
+CATATAN_BG = "#fce8f2"
+GALAT = "#b91c1c"
+KONSOL_BG = "#1f1b4a"
+KONSOL_FG = "#f6d6ea"
+
+FONT = ("Segoe UI", 10)
+FONT_TEBAL = ("Segoe UI", 10, "bold")
+FONT_JUDUL = ("Segoe UI", 16, "bold")
+FONT_KECIL = ("Segoe UI", 9)
+FONT_GRUP = ("Segoe UI", 8, "bold")
+FONT_MONO = ("Consolas", 10)
+
+
+def campur(c1, c2, t):
+    """Warna di antara c1 dan c2 (t = 0..1), untuk gradasi."""
+    a = (int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16))
+    b = (int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16))
+    r = int(a[0] + (b[0] - a[0]) * t)
+    g = int(a[1] + (b[1] - a[1]) * t)
+    bl = int(a[2] + (b[2] - a[2]) * t)
+    return "#%02x%02x%02x" % (r, g, bl)
+
+
+def gradasi(t):
+    """Biru malam -> ungu -> magenta untuk header."""
+    if t < 0.55:
+        return campur(UNGU_TUA, UNGU, t / 0.55)
+    return campur(UNGU, PINK, (t - 0.55) / 0.45)
+
+
+def kotak_bulat(kanvas, x1, y1, x2, y2, r, warna):
+    """Persegi panjang bersudut membulat di Canvas."""
+    titik = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
+             x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+             x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+    return kanvas.create_polygon(titik, smooth=True, fill=warna, outline=warna)
+
+
+class TombolBulat(tk.Canvas):
+    """Tombol dengan sudut membulat dan efek sorot. Dipakai untuk menu dan aksi."""
+    def __init__(self, induk, teks, perintah, latar, warna, warna_sorot,
+                 warna_teks, font, tinggi=34, rata="center", lebar=None,
+                 radius=12):
+        tk.Canvas.__init__(self, induk, height=tinggi, bg=latar, bd=0,
+                           highlightthickness=0, cursor="hand2")
+        if lebar is not None:
+            self.configure(width=lebar)
+        self.teks = teks
+        self.perintah = perintah
+        self.warna = warna
+        self.warna_sorot = warna_sorot
+        self.warna_teks = warna_teks
+        self.warna_teks_aktif = "white"
+        self.font = font
+        self.rata = rata
+        self.radius = radius
+        self.aktif = False
+        self.di_atas = False
+        self.bind("<Configure>", lambda e: self._gambar())
+        self.bind("<Enter>", self._masuk)
+        self.bind("<Leave>", self._keluar)
+        self.bind("<ButtonRelease-1>", self._klik)
+
+    def _gambar(self):
+        self.delete("all")
+        w = self.winfo_width()
+        h = self.winfo_height()
+        if w < 10:
+            return
+        if self.aktif:
+            isi = UNGU
+            tulisan = self.warna_teks_aktif
+        elif self.di_atas:
+            isi = self.warna_sorot
+            tulisan = self.warna_teks
+        else:
+            isi = self.warna
+            tulisan = self.warna_teks
+        kotak_bulat(self, 1, 1, w - 1, h - 1, self.radius, isi)
+        if self.rata == "w":
+            self.create_text(14, h // 2, text=self.teks, fill=tulisan,
+                             font=self.font, anchor="w")
+        else:
+            self.create_text(w // 2, h // 2, text=self.teks, fill=tulisan,
+                             font=self.font)
+
+    def set_aktif(self, nilai):
+        self.aktif = nilai
+        self._gambar()
+
+    def _masuk(self, _):
+        self.di_atas = True
+        self._gambar()
+
+    def _keluar(self, _):
+        self.di_atas = False
+        self._gambar()
+
+    def _klik(self, event):
+        if 0 <= event.x <= self.winfo_width() and 0 <= event.y <= self.winfo_height():
+            self.perintah()
 
 
 class AplikasiUI:
@@ -614,17 +722,17 @@ class AplikasiUI:
         self.menu_aktif = None
         self.vars = []
         self.entri_pertama = None
+        self.baris_ke = 0
 
         root.title("2EZ4U Food Delivery")
-        root.geometry("1120x760")
-        root.minsize(900, 620)
-        gaya = ttk.Style()
-        try:
-            gaya.theme_use("clam")
-        except tk.TclError:
-            pass
-        gaya.configure("Treeview", rowheight=22, font=FONT_MONO)
-        gaya.configure("Treeview.Heading", font=FONT_TEBAL)
+        root.configure(bg=LAVENDER)
+        lebar = min(1280, int(root.winfo_screenwidth() * 0.86))
+        tinggi = min(820, int(root.winfo_screenheight() * 0.86))
+        kiri = (root.winfo_screenwidth() - lebar) // 2
+        atas = max(0, (root.winfo_screenheight() - tinggi) // 3)
+        root.geometry(f"{lebar}x{tinggi}+{kiri}+{atas}")
+        root.minsize(960, 640)
+        self._atur_gaya()
 
         self._bangun_header()
         self._bangun_bawah()
@@ -632,47 +740,126 @@ class AplikasiUI:
         self._bangun_menu_kiri()
         self.pilih(self.menu[0])
 
+    # ---- gaya ttk (tabel, scrollbar, combobox) ----
+    def _atur_gaya(self):
+        gaya = ttk.Style()
+        try:
+            gaya.theme_use("clam")
+        except tk.TclError:
+            pass
+        gaya.configure("Treeview", rowheight=26, font=FONT_MONO,
+                       background=KARTU, fieldbackground=KARTU,
+                       foreground=TEKS, borderwidth=0)
+        gaya.configure("Treeview.Heading", font=FONT_TEBAL, background=PANEL,
+                       foreground=UNGU_TUA, relief="flat", padding=(8, 6),
+                       borderwidth=0)
+        gaya.map("Treeview", background=[("selected", "#e6cff3")],
+                 foreground=[("selected", TEKS)])
+        gaya.map("Treeview.Heading", background=[("active", GARIS)])
+        for arah in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):
+            gaya.configure(arah, background=LILAC, troughcolor=LAVENDER,
+                           bordercolor=LAVENDER, lightcolor=LILAC,
+                           darkcolor=LILAC, arrowcolor=UNGU, relief="flat",
+                           arrowsize=14)
+            gaya.map(arah, background=[("active", "#b27ad0")])
+        gaya.configure("TCombobox", fieldbackground=KARTU, background=PANEL,
+                       foreground=TEKS, arrowcolor=UNGU, bordercolor=GARIS,
+                       lightcolor=KARTU, darkcolor=KARTU, padding=5)
+        gaya.map("TCombobox", fieldbackground=[("readonly", KARTU)],
+                 foreground=[("readonly", TEKS)])
+        self.root.option_add("*TCombobox*Listbox.background", KARTU)
+        self.root.option_add("*TCombobox*Listbox.foreground", TEKS)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", UNGU)
+        self.root.option_add("*TCombobox*Listbox.font", FONT)
+
     # ---- kerangka ----
     def _bangun_header(self):
-        h = tk.Frame(self.root, bg=BIRU_TUA)
-        h.pack(side="top", fill="x")
-        tk.Label(h, text="2EZ4U Food Delivery", bg=BIRU_TUA, fg="white",
-                 font=("Segoe UI", 13, "bold"), padx=12, pady=8).pack(side="left")
+        self.header = tk.Canvas(self.root, height=72, bd=0, highlightthickness=0)
+        self.header.pack(side="top", fill="x")
+        self.header.bind("<Configure>", self._gambar_header)
+
+    def _gambar_header(self, event):
+        c = self.header
+        c.delete("all")
+        w = event.width
+        langkah = 4
+        for x in range(0, w, langkah):
+            c.create_rectangle(x, 0, x + langkah, 72, outline="",
+                               fill=gradasi(x / max(w, 1)))
+        # gelembung hiasan di kanan
+        c.create_oval(w - 150, -40, w - 30, 80, outline="", fill="#e0679f")
+        c.create_oval(w - 90, 20, w + 10, 120, outline="", fill="#f08cba")
+        c.create_oval(w - 230, 30, w - 170, 90, outline="", fill="#b7569f")
+        c.create_text(26, 28, text="2EZ4U Food Delivery", fill="white",
+                      font=("Segoe UI", 18, "bold"), anchor="w")
+        c.create_text(28, 54, text="mini engine pesanan  -  array, antrean, sort, search",
+                      fill="#f3d9f0", font=FONT_KECIL, anchor="w")
 
     def _bangun_bawah(self):
-        b = tk.Frame(self.root, bg="#e5e7eb")
+        b = tk.Frame(self.root, bg=PANEL)
         b.pack(side="bottom", fill="x")
-        tk.Button(b, text="Tutup", command=self.root.destroy, bg=BIRU_TUA,
-                  fg="white", relief="flat", padx=14, font=FONT_TEBAL
-                  ).pack(side="left", padx=8, pady=6)
+        TombolBulat(b, "Tutup", self.root.destroy, PANEL, UNGU, UNGU_HOVER,
+                    "white", FONT_TEBAL, tinggi=32, lebar=96).pack(
+            side="left", padx=(14, 10), pady=8)
         self.status = tk.StringVar(value="Siap. Klik Load untuk memuat data.")
-        tk.Label(b, textvariable=self.status, bg=BIRU_TUA, fg="white",
-                 font=FONT_MONO, padx=8, pady=3).pack(side="left", pady=6)
+        tk.Label(b, textvariable=self.status, bg=PANEL, fg=UNGU_TUA,
+                 font=FONT_MONO, anchor="w").pack(side="left", pady=8)
 
     def _bangun_badan(self):
-        self.badan = tk.Frame(self.root)
+        self.badan = tk.Frame(self.root, bg=LAVENDER)
         self.badan.pack(side="top", fill="both", expand=True)
-        self.kiri = tk.Frame(self.badan, bg=ABU_PANEL, width=330)
+        self.kiri = tk.Frame(self.badan, bg=PANEL, width=372)
         self.kiri.pack(side="left", fill="y")
         self.kiri.pack_propagate(False)
-        self.kanan = tk.Frame(self.badan, padx=14, pady=8)
+        self.kanan = tk.Frame(self.badan, bg=LAVENDER, padx=20, pady=12)
         self.kanan.pack(side="left", fill="both", expand=True)
 
-        self.judul = tk.Label(self.kanan, text="", font=FONT_JUDUL, anchor="w",
-                              justify="left")
+        self.judul = tk.Label(self.kanan, text="", font=FONT_JUDUL, fg=TEKS,
+                              bg=LAVENDER, anchor="w", justify="left")
         self.judul.pack(fill="x")
-        self.sub = tk.Label(self.kanan, text="", font=FONT_KECIL, fg="#555",
-                            anchor="w", justify="left")
-        self.sub.pack(fill="x", pady=(0, 6))
-        self.form = tk.Frame(self.kanan)
-        self.form.pack(fill="x")
-        self.ringkas = tk.Label(self.kanan, text="", font=FONT, anchor="w",
-                                justify="left")
-        self.ringkas.pack(fill="x", pady=(8, 4))
+        self.sub = tk.Label(self.kanan, text="", font=FONT_KECIL,
+                            fg=TEKS_REDUP, bg=LAVENDER, anchor="w",
+                            justify="left")
+        self.sub.pack(fill="x", pady=(2, 8))
 
-        kt = tk.Frame(self.kanan)
+        # kartu form
+        self.form = tk.Frame(self.kanan, bg=KARTU, highlightthickness=1,
+                             highlightbackground=GARIS, padx=16, pady=12)
+        self.form.pack(fill="x")
+
+        self.ringkas = tk.Label(self.kanan, text="", font=FONT, fg=TEKS,
+                                bg=LAVENDER, anchor="w", justify="left")
+        self.ringkas.pack(fill="x", pady=(10, 6))
+
+        # catatan dan COMMAND dipasang dari bawah lebih dulu supaya tidak terpotong
+        kn = tk.Frame(self.kanan, bg=CATATAN_BG)
+        kn.pack(side="bottom", fill="x", pady=(10, 0))
+        tk.Frame(kn, bg=PINK, width=5).pack(side="left", fill="y")
+        self.catatan = tk.Label(kn, text="", font=FONT_KECIL, fg=TEKS,
+                                bg=CATATAN_BG, anchor="w", justify="left",
+                                padx=12, pady=8)
+        self.catatan.pack(side="left", fill="x", expand=True)
+
+        kc = tk.Frame(self.kanan, bg=KONSOL_BG)
+        kc.pack(side="bottom", fill="x")
+        tk.Label(self.kanan, text="COMMAND", font=FONT_GRUP, fg=UNGU,
+                 bg=LAVENDER, anchor="w").pack(side="bottom", fill="x",
+                                               pady=(10, 3))
+        self.cmd = tk.Text(kc, height=4, font=FONT_MONO, state="disabled",
+                           bg=KONSOL_BG, fg=KONSOL_FG, wrap="none", bd=0,
+                           highlightthickness=0, padx=12, pady=8,
+                           insertbackground=KONSOL_FG, selectbackground=UNGU)
+        sc = ttk.Scrollbar(kc, orient="vertical", command=self.cmd.yview)
+        self.cmd.configure(yscrollcommand=sc.set)
+        self.cmd.pack(side="left", fill="x", expand=True)
+        sc.pack(side="right", fill="y")
+
+        # kartu tabel mengisi sisa ruang di tengah
+        kt = tk.Frame(self.kanan, bg=KARTU, highlightthickness=1,
+                      highlightbackground=GARIS)
         kt.pack(fill="both", expand=True)
-        self.tabel = ttk.Treeview(kt, show="headings")
+        self.tabel = ttk.Treeview(kt, show="headings", height=4)
+        self.tabel.tag_configure("genap", background="#fbf6fd")
         sy = ttk.Scrollbar(kt, orient="vertical", command=self.tabel.yview)
         sx = ttk.Scrollbar(kt, orient="horizontal", command=self.tabel.xview)
         self.tabel.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
@@ -681,37 +868,21 @@ class AplikasiUI:
         sx.grid(row=1, column=0, sticky="ew")
         kt.grid_rowconfigure(0, weight=1)
         kt.grid_columnconfigure(0, weight=1)
-
-        tk.Label(self.kanan, text="COMMAND", font=FONT_KECIL, fg="#555",
-                 anchor="w").pack(fill="x", pady=(8, 0))
-        kc = tk.Frame(self.kanan)
-        kc.pack(fill="x")
-        self.cmd = tk.Text(kc, height=6, font=FONT_MONO, state="disabled",
-                           bg="#fafafa", wrap="none")
-        sc = ttk.Scrollbar(kc, orient="vertical", command=self.cmd.yview)
-        self.cmd.configure(yscrollcommand=sc.set)
-        self.cmd.pack(side="left", fill="x", expand=True)
-        sc.pack(side="right", fill="y")
-
-        self.catatan = tk.Label(self.kanan, text="", font=FONT_KECIL,
-                                bg=KUNING, anchor="w", justify="left",
-                                padx=8, pady=6)
-        self.catatan.pack(fill="x", pady=(8, 0))
         self.kanan.bind("<Configure>", self._atur_lebar)
 
     def _atur_lebar(self, event):
-        lebar = max(300, event.width - 40)
+        lebar = max(300, event.width - 80)
         self.sub.configure(wraplength=lebar)
         self.ringkas.configure(wraplength=lebar)
         self.catatan.configure(wraplength=lebar)
 
     def _bangun_menu_kiri(self):
-        kanvas = tk.Canvas(self.kiri, bg=ABU_PANEL, highlightthickness=0)
+        kanvas = tk.Canvas(self.kiri, bg=PANEL, highlightthickness=0)
         sb = ttk.Scrollbar(self.kiri, orient="vertical", command=kanvas.yview)
         kanvas.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         kanvas.pack(side="left", fill="both", expand=True)
-        dalam = tk.Frame(kanvas, bg=ABU_PANEL)
+        dalam = tk.Frame(kanvas, bg=PANEL)
         jendela = kanvas.create_window((0, 0), window=dalam, anchor="nw")
         dalam.bind("<Configure>",
                    lambda e: kanvas.configure(scrollregion=kanvas.bbox("all")))
@@ -742,24 +913,22 @@ class AplikasiUI:
         grup_terakhir = ""
         for menu in self.menu:
             if menu.grup != grup_terakhir:
-                tk.Label(dalam, text=menu.grup, bg=ABU_PANEL, fg="#555",
-                         font=FONT_KECIL, anchor="w").pack(
-                    fill="x", padx=8, pady=(10, 2))
+                tk.Label(dalam, text=menu.grup, bg=PANEL, fg=UNGU,
+                         font=FONT_GRUP, anchor="w").pack(
+                    fill="x", padx=16, pady=(14, 4))
                 grup_terakhir = menu.grup
-            tombol = tk.Button(dalam, text=menu.label, anchor="w", bg="white",
-                               activebackground="#e5edf8", relief="flat",
-                               bd=1, highlightthickness=1,
-                               highlightbackground="#d1d5db", font=FONT,
-                               padx=8, pady=2,
-                               command=lambda m=menu: self.pilih(m))
-            tombol.pack(fill="x", padx=8, pady=1)
+            tombol = TombolBulat(dalam, menu.label,
+                                 lambda m=menu: self.pilih(m), PANEL, KARTU,
+                                 HOVER_MENU, TEKS, FONT, tinggi=34, rata="w")
+            tombol.pack(fill="x", padx=12, pady=2)
             self.tombol_menu.append((menu, tombol))
+        tk.Frame(dalam, bg=PANEL, height=12).pack()
 
     # pilih menu & form
     def pilih(self, menu):
         self.menu_aktif = menu
         for m, tombol in self.tombol_menu:
-            tombol.configure(bg="#cfe0f5" if m is menu else "white")
+            tombol.set_aktif(m is menu)
         self.judul.configure(text=menu.judul)
         self.sub.configure(text=menu.sub)
         self.catatan.configure(text=menu.catatan)
@@ -773,31 +942,37 @@ class AplikasiUI:
         self.entri_pertama = None
         kolom = 0
         for isian in menu.isian:
-            tk.Label(self.form, text=isian.label, font=FONT_TEBAL,
-                     anchor="w").grid(row=0, column=kolom, sticky="w",
-                                      padx=(0, 12))
+            tk.Label(self.form, text=isian.label, font=FONT_TEBAL, fg=TEKS,
+                     bg=KARTU, anchor="w").grid(row=0, column=kolom,
+                                                sticky="w", padx=(0, 16))
             v = tk.StringVar(value=isian.awal)
             if isian.tipe == "combo":
                 w = ttk.Combobox(self.form, textvariable=v, state="readonly",
-                                 values=isian.opsi, width=12)
+                                 values=isian.opsi, width=14, font=FONT)
             else:
                 lebar = 46 if len(isian.awal) > 20 else 22
-                w = tk.Entry(self.form, textvariable=v, width=lebar,
-                             font=FONT)
+                w = tk.Entry(self.form, textvariable=v, width=lebar, font=FONT,
+                             fg=TEKS, bg=KARTU, relief="flat",
+                             highlightthickness=2, highlightbackground=GARIS,
+                             highlightcolor=UNGU, insertbackground=UNGU,
+                             selectbackground="#e6cff3", selectforeground=TEKS)
                 w.bind("<Return>", lambda e: self.jalankan())
                 if self.entri_pertama is None:
                     self.entri_pertama = w
-            w.grid(row=1, column=kolom, sticky="w", padx=(0, 12))
+            w.grid(row=1, column=kolom, sticky="w", padx=(0, 16), pady=(4, 0),
+                   ipady=4)
             if isian.petunjuk != "":
                 tk.Label(self.form, text=isian.petunjuk, font=FONT_KECIL,
-                         fg="#666", anchor="w", justify="left",
-                         wraplength=330).grid(row=2, column=kolom,
-                                              sticky="w", padx=(0, 12))
+                         fg=TEKS_REDUP, bg=KARTU, anchor="w", justify="left",
+                         wraplength=250).grid(row=2, column=kolom, sticky="w",
+                                              padx=(0, 16), pady=(4, 0))
             self.vars.append(v)
             kolom += 1
-        tk.Button(self.form, text=menu.tombol, command=self.jalankan,
-                  bg=BIRU_TUA, fg="white", relief="flat", padx=22, pady=4,
-                  font=FONT_TEBAL).grid(row=1, column=kolom, sticky="w")
+        lebar_tombol = len(menu.tombol) * 11 + 52
+        TombolBulat(self.form, menu.tombol, self.jalankan, KARTU, UNGU,
+                    UNGU_HOVER, "white", FONT_TEBAL, tinggi=36,
+                    lebar=lebar_tombol, radius=14).grid(
+            row=1, column=kolom, sticky="w", pady=(4, 0))
         if self.entri_pertama is not None:
             self.entri_pertama.focus_set()
 
@@ -823,17 +998,18 @@ class AplikasiUI:
         self._tampilkan(hasil)
 
     def _bersihkan_hasil(self):
-        self.ringkas.configure(text="", fg="black")
+        self.ringkas.configure(text="", fg=TEKS)
         self.tabel.delete(*self.tabel.get_children())
+        self.baris_ke = 0
 
     def _tampilkan_galat(self, pesan):
         self._bersihkan_hasil()
-        self.ringkas.configure(text=pesan, fg="#b00020")
+        self.ringkas.configure(text=pesan, fg=GALAT)
         self.status.set("Ditolak.")
 
     def _tampilkan(self, hasil):
         self._bersihkan_hasil()
-        self.ringkas.configure(text="\n".join(hasil.ringkas), fg="black")
+        self.ringkas.configure(text="\n".join(hasil.ringkas), fg=TEKS)
         self._isi_tabel(hasil.kolom, hasil.baris)
         self.status.set(f"[{hasil.modul}]  {fmt_ms(hasil.ms)} ms")
         self._catat(hasil)
@@ -847,12 +1023,16 @@ class AplikasiUI:
                 panjang = len(str(baris[r][i]))
                 if panjang > lebar:
                     lebar = panjang
-            px = min(max(lebar * 8 + 24, 70), 420)
-            self.tabel.heading(kolom[i], text=kolom[i])
+            px = min(max(lebar * 9 + 28, 80), 440)
+            self.tabel.heading(kolom[i], text=kolom[i], anchor="w")
             self.tabel.column(kolom[i], width=px, minwidth=50,
                               stretch=(i == n - 1), anchor="w")
         for r in baris:
-            self.tabel.insert("", "end", values=r)
+            if self.baris_ke % 2 == 1:
+                self.tabel.insert("", "end", values=r, tags=("genap",))
+            else:
+                self.tabel.insert("", "end", values=r)
+            self.baris_ke += 1
 
     def _catat(self, hasil):
         teks = (f"{hasil.perintah:<24}-> {hasil.modul:<22}"
@@ -867,6 +1047,11 @@ def main():
         print("Tkinter tidak ditemukan. Pasang Python dengan komponen Tcl/Tk "
               "(Windows: centang 'tcl/tk and IDLE' saat instalasi).")
         return
+    try:                                   # tampilan tajam di layar beresolusi tinggi
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
     root = tk.Tk()
     AplikasiUI(root, Kontroler())
     root.mainloop()
