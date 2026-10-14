@@ -182,10 +182,6 @@ Ongkos sekali bayar membangun daftar terurut `oid`: 1.155,14 ms. Binary search b
 
 > Waktu (ms) bergantung pada mesin dan beban saat pengukuran. Yang dinilai adalah **polanya**: jumlah perbandingan, jumlah geseran, dan rasio antar-versi. Setiap angka bisa diperiksa ulang lewat menu aplikasi.
 
-## Screenshot dan Demo
-
-_(isi dengan screenshot tiap menu dan tautan video demo)_
-
 ## Catatan Desain
 
 - Tanpa `dict`/`set`: semua struktur dibangun dari `list` primitif, tuple, dan class biasa.
