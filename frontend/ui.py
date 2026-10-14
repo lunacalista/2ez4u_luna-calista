@@ -29,17 +29,21 @@ if _ROOT not in sys.path:
 try:
     import tkinter as tk
     from tkinter import ttk
-except ImportError:          
+    import tkinter.font as tkfont
+except ImportError:
     tk = None
     ttk = None
+    tkfont = None
 
 from backend.m1_pesanan import Array, LinkList, Pesanan, baca_csv, ukur
 from backend.m2_antrean import ManajerUndoRedo, proses_kasir, format_rupiah
 from backend.m3_laporan import (jalankan_sort, jalankan_cari,
                                 bangun_indeks_oid, array_ke_list, kunci_oid)
 
-BATAS_TAMPIL = 200000    # baris tabel yang ditampilkan paling banyak (200000 = semua)
-
+BATAS_TAMPIL = 200000
+BATAS_LOAD = 1000   # baris yang ditampilkan setelah Load
+KOLOM_LOAD = ("#", "oid", "pelanggan", "resto", "menu", "harga",
+              "masuk", "selesai", "status")
 
 # Pembantu format
 def angka(n):
@@ -60,13 +64,11 @@ def angka(n):
         return "-" + hasil
     return hasil
 
-
 def fmt_ms(ms):
     """Waktu dalam ms; operasi sangat cepat diberi lebih banyak desimal."""
     if ms < 0.1:
         return f"{ms:.3f}"
     return f"{ms:.2f}"
-
 
 def jam(detik):
     """Detik sejak 00:00 -> 'HH:MM:SS'; None -> '-'."""
@@ -78,7 +80,6 @@ def jam(detik):
     s = detik % 60
     return f"{h:02d}:{m:02d}:{s:02d}"
 
-
 def detail(p):
     """Satu pesanan sebagai daftar pasangan (kolom, isi)."""
     return [("oid", p.oid), ("pelanggan", p.pelanggan), ("resto", p.resto),
@@ -86,13 +87,10 @@ def detail(p):
             ("prioritas", str(p.prioritas)), ("masuk", jam(p.t_masuk)),
             ("selesai", jam(p.t_selesai)), ("status", p.status)]
 
-
 def baris_pesanan(nomor, p):
     return (str(nomor), p.oid, p.pelanggan, p.resto, p.menu, jam(p.t_masuk))
 
-
 KOLOM_PESANAN = ("#", "oid", "pelanggan", "resto", "menu", "masuk")
-
 
 class Hasil:
     """Keluaran satu perintah, siap ditampilkan UI."""
@@ -105,7 +103,7 @@ class Hasil:
         self.baris = baris if baris is not None else []
 
 
-# Kontroler: menjembatani UI dengan backend. Tanpa Tkinter, jadi bisa diuji.
+# Kontroler: menjembatani UI dengan backend
 class Kontroler:
     def __init__(self, path_csv=None):
         if path_csv is None:
@@ -180,12 +178,20 @@ class Kontroler:
         self.indeks_oid = None
         self.oid_berikut = len(semua) + 1
         total = (time.perf_counter() - awal) * 1000
+        tampil = min(len(semua), BATAS_LOAD)
+        baris = []
+        for i in range(tampil):
+            p = semua[i]
+            baris.append((str(i + 1), p.oid, p.pelanggan, p.resto, p.menu,
+                          angka(p.harga), jam(p.t_masuk), jam(p.t_selesai),
+                          p.status))
         return Hasil("load", "M1 - larik", total, [
             f"{angka(len(semua))} pesanan dimuat dari data/pesanan.csv.",
             f"Isi Array: {ms_arr:.2f} ms | isi LinkList: {ms_ll:.2f} ms "
             "(keduanya lewat append, urutan file).",
             f"{angka(antre)} pesanan berstatus ANTRE masuk ke kedua antrean (M2).",
-        ])
+            f"Menampilkan {angka(tampil)} pesanan pertama dari {angka(len(semua))}.",
+        ], KOLOM_LOAD, baris)
 
     # M1
     def _struktur(self, nama):
@@ -416,7 +422,7 @@ class Isian:
     def __init__(self, label, awal="", tipe="entry", opsi=(), petunjuk=""):
         self.label = label
         self.awal = awal
-        self.tipe = tipe            # "entry" atau "combo"
+        self.tipe = tipe
         self.opsi = opsi
         self.petunjuk = petunjuk
 
@@ -426,8 +432,8 @@ class Menu:
                  catatan):
         self.grup = grup
         self.label = label
-        self.aksi = aksi            # nama method Kontroler
-        self.tetap = tetap          # argumen tetap di depan isian form
+        self.aksi = aksi
+        self.tetap = tetap
         self.judul = judul
         self.sub = sub
         self.isian = isian
@@ -593,11 +599,7 @@ def daftar_menu():
                   "SUDAH terurut menurut kunci yang dicari; di sini terurut menurut oid."))
     return m
 
-
-# ======================================================================
-# Jendela Tkinter (tema ungu)
-# Hanya urusan tampilan. Logikanya ada di Kontroler di atas.
-# ======================================================================
+# Jendela Tkinter
 UNGU = "#8b4aa8"          # ungu sedang (warna badan): tombol dan aksen utama
 UNGU_TUA = "#2a2561"      # biru malam (warna surai): teks judul tabel, header
 UNGU_HOVER = "#763a92"
@@ -618,9 +620,13 @@ KONSOL_FG = "#f6d6ea"
 FONT = ("Segoe UI", 10)
 FONT_TEBAL = ("Segoe UI", 10, "bold")
 FONT_JUDUL = ("Segoe UI", 16, "bold")
+FONT_HEADER = ("Segoe UI", 18, "bold")
 FONT_KECIL = ("Segoe UI", 9)
 FONT_GRUP = ("Segoe UI", 8, "bold")
 FONT_MONO = ("Consolas", 10)
+# font khusus tabel hasil
+FONT_TABEL = ("Consolas", 12)
+FONT_TABEL_HEAD = ("Segoe UI", 12, "bold")
 
 
 def campur(c1, c2, t):
@@ -724,14 +730,35 @@ class AplikasiUI:
         self.entri_pertama = None
         self.baris_ke = 0
 
+        # skala layar + ukuran font nyata, dipakai untuk semua dimensi
+        self.skala = max(1.0, root.winfo_fpixels("1i") / 96.0)
+        self.f_mono = tkfont.Font(root=root, font=FONT_MONO)
+        self.f_tabel = tkfont.Font(root=root, font=FONT_TABEL)
+        self.f_menu = tkfont.Font(root=root, font=FONT)
+        self.f_tebal = tkfont.Font(root=root, font=FONT_TEBAL)
+        self.f_judul = tkfont.Font(root=root, font=FONT_HEADER)
+        self.f_kecil = tkfont.Font(root=root, font=FONT_KECIL)
+        self.tinggi_tombol = max(self.px(34),
+                                 self.f_menu.metrics("linespace") + self.px(14))
+        self.tinggi_header = (self.f_judul.metrics("linespace")
+                              + self.f_kecil.metrics("linespace") + self.px(8))
+        terpanjang = 0
+        for m in self.menu:
+            terpanjang = max(terpanjang, self.f_menu.measure(m.label))
+        self.lebar_kiri = max(self.px(372), terpanjang + self.px(70))
+
         root.title("2EZ4U Food Delivery")
         root.configure(bg=LAVENDER)
-        lebar = min(1280, int(root.winfo_screenwidth() * 0.86))
-        tinggi = min(820, int(root.winfo_screenheight() * 0.86))
+        lebar = min(self.px(1280), int(root.winfo_screenwidth() * 0.86))
+        tinggi = min(self.px(900), int(root.winfo_screenheight() * 0.92))
         kiri = (root.winfo_screenwidth() - lebar) // 2
-        atas = max(0, (root.winfo_screenheight() - tinggi) // 3)
+        atas = max(0, (root.winfo_screenheight() - tinggi) // 4)
         root.geometry(f"{lebar}x{tinggi}+{kiri}+{atas}")
-        root.minsize(960, 640)
+        root.minsize(self.px(960), self.px(640))
+        try:
+            root.state("zoomed")
+        except tk.TclError:
+            pass
         self._atur_gaya()
 
         self._bangun_header()
@@ -740,19 +767,23 @@ class AplikasiUI:
         self._bangun_menu_kiri()
         self.pilih(self.menu[0])
 
-    # ---- gaya ttk (tabel, scrollbar, combobox) ----
+    def px(self, n):
+        """Ukuran piksel tetap -> disesuaikan dengan skala layar."""
+        return int(n * self.skala)
+
     def _atur_gaya(self):
         gaya = ttk.Style()
         try:
             gaya.theme_use("clam")
         except tk.TclError:
             pass
-        gaya.configure("Treeview", rowheight=26, font=FONT_MONO,
-                       background=KARTU, fieldbackground=KARTU,
+        gaya.configure("Treeview",
+                       rowheight=self.f_tabel.metrics("linespace") + self.px(2),
+                       font=FONT_TABEL, background=KARTU, fieldbackground=KARTU,
                        foreground=TEKS, borderwidth=0)
-        gaya.configure("Treeview.Heading", font=FONT_TEBAL, background=PANEL,
-                       foreground=UNGU_TUA, relief="flat", padding=(8, 6),
-                       borderwidth=0)
+        gaya.configure("Treeview.Heading", font=FONT_TABEL_HEAD, background=PANEL,
+                       foreground=UNGU_TUA, relief="flat",
+                       padding=(self.px(8), self.px(3)), borderwidth=0)
         gaya.map("Treeview", background=[("selected", "#e6cff3")],
                  foreground=[("selected", TEKS)])
         gaya.map("Treeview.Heading", background=[("active", GARIS)])
@@ -760,7 +791,7 @@ class AplikasiUI:
             gaya.configure(arah, background=LILAC, troughcolor=LAVENDER,
                            bordercolor=LAVENDER, lightcolor=LILAC,
                            darkcolor=LILAC, arrowcolor=UNGU, relief="flat",
-                           arrowsize=14)
+                           arrowsize=self.px(14))
             gaya.map(arah, background=[("active", "#b27ad0")])
         gaya.configure("TCombobox", fieldbackground=KARTU, background=PANEL,
                        foreground=TEKS, arrowcolor=UNGU, bordercolor=GARIS,
@@ -772,9 +803,10 @@ class AplikasiUI:
         self.root.option_add("*TCombobox*Listbox.selectBackground", UNGU)
         self.root.option_add("*TCombobox*Listbox.font", FONT)
 
-    # ---- kerangka ----
+    # kerangka UI
     def _bangun_header(self):
-        self.header = tk.Canvas(self.root, height=72, bd=0, highlightthickness=0)
+        self.header = tk.Canvas(self.root, height=self.tinggi_header, bd=0,
+                                highlightthickness=0)
         self.header.pack(side="top", fill="x")
         self.header.bind("<Configure>", self._gambar_header)
 
@@ -782,24 +814,31 @@ class AplikasiUI:
         c = self.header
         c.delete("all")
         w = event.width
+        h = self.tinggi_header
         langkah = 4
         for x in range(0, w, langkah):
-            c.create_rectangle(x, 0, x + langkah, 72, outline="",
+            c.create_rectangle(x, 0, x + langkah, h, outline="",
                                fill=gradasi(x / max(w, 1)))
         # gelembung hiasan di kanan
         c.create_oval(w - 150, -40, w - 30, 80, outline="", fill="#e0679f")
         c.create_oval(w - 90, 20, w + 10, 120, outline="", fill="#f08cba")
         c.create_oval(w - 230, 30, w - 170, 90, outline="", fill="#b7569f")
-        c.create_text(26, 28, text="2EZ4U Food Delivery", fill="white",
-                      font=("Segoe UI", 18, "bold"), anchor="w")
-        c.create_text(28, 54, text="mini engine pesanan  -  array, antrean, sort, search",
+        ls_judul = self.f_judul.metrics("linespace")
+        ls_kecil = self.f_kecil.metrics("linespace")
+        y1 = self.px(4) + ls_judul // 2
+        y2 = self.px(4) + ls_judul + self.px(2) + ls_kecil // 2
+        c.create_text(self.px(26), y1, text="2EZ4U Food Delivery", fill="white",
+                      font=FONT_HEADER, anchor="w")
+        c.create_text(self.px(28), y2,
+                      text="mini engine pesanan  -  array, antrean, sort, search",
                       fill="#f3d9f0", font=FONT_KECIL, anchor="w")
 
     def _bangun_bawah(self):
         b = tk.Frame(self.root, bg=PANEL)
         b.pack(side="bottom", fill="x")
         TombolBulat(b, "Tutup", self.root.destroy, PANEL, UNGU, UNGU_HOVER,
-                    "white", FONT_TEBAL, tinggi=32, lebar=96).pack(
+                    "white", FONT_TEBAL, tinggi=self.tinggi_tombol - self.px(2),
+                    lebar=self.f_tebal.measure("Tutup") + self.px(48)).pack(
             side="left", padx=(14, 10), pady=8)
         self.status = tk.StringVar(value="Siap. Klik Load untuk memuat data.")
         tk.Label(b, textvariable=self.status, bg=PANEL, fg=UNGU_TUA,
@@ -808,7 +847,7 @@ class AplikasiUI:
     def _bangun_badan(self):
         self.badan = tk.Frame(self.root, bg=LAVENDER)
         self.badan.pack(side="top", fill="both", expand=True)
-        self.kiri = tk.Frame(self.badan, bg=PANEL, width=372)
+        self.kiri = tk.Frame(self.badan, bg=PANEL, width=self.lebar_kiri)
         self.kiri.pack(side="left", fill="y")
         self.kiri.pack_propagate(False)
         self.kanan = tk.Frame(self.badan, bg=LAVENDER, padx=20, pady=12)
@@ -824,12 +863,12 @@ class AplikasiUI:
 
         # kartu form
         self.form = tk.Frame(self.kanan, bg=KARTU, highlightthickness=1,
-                             highlightbackground=GARIS, padx=16, pady=12)
+                             highlightbackground=GARIS, padx=16, pady=8)
         self.form.pack(fill="x")
 
         self.ringkas = tk.Label(self.kanan, text="", font=FONT, fg=TEKS,
                                 bg=LAVENDER, anchor="w", justify="left")
-        self.ringkas.pack(fill="x", pady=(10, 6))
+        self.ringkas.pack(fill="x", pady=(6, 3))
 
         # catatan dan COMMAND dipasang dari bawah lebih dulu supaya tidak terpotong
         kn = tk.Frame(self.kanan, bg=CATATAN_BG)
@@ -837,7 +876,7 @@ class AplikasiUI:
         tk.Frame(kn, bg=PINK, width=5).pack(side="left", fill="y")
         self.catatan = tk.Label(kn, text="", font=FONT_KECIL, fg=TEKS,
                                 bg=CATATAN_BG, anchor="w", justify="left",
-                                padx=12, pady=8)
+                                padx=12, pady=4)
         self.catatan.pack(side="left", fill="x", expand=True)
 
         kc = tk.Frame(self.kanan, bg=KONSOL_BG)
@@ -845,7 +884,7 @@ class AplikasiUI:
         tk.Label(self.kanan, text="COMMAND", font=FONT_GRUP, fg=UNGU,
                  bg=LAVENDER, anchor="w").pack(side="bottom", fill="x",
                                                pady=(10, 3))
-        self.cmd = tk.Text(kc, height=4, font=FONT_MONO, state="disabled",
+        self.cmd = tk.Text(kc, height=2, font=FONT_MONO, state="disabled",
                            bg=KONSOL_BG, fg=KONSOL_FG, wrap="none", bd=0,
                            highlightthickness=0, padx=12, pady=8,
                            insertbackground=KONSOL_FG, selectbackground=UNGU)
@@ -871,7 +910,7 @@ class AplikasiUI:
         self.kanan.bind("<Configure>", self._atur_lebar)
 
     def _atur_lebar(self, event):
-        lebar = max(300, event.width - 80)
+        lebar = max(self.px(300), event.width - self.px(80))
         self.sub.configure(wraplength=lebar)
         self.ringkas.configure(wraplength=lebar)
         self.catatan.configure(wraplength=lebar)
@@ -919,7 +958,8 @@ class AplikasiUI:
                 grup_terakhir = menu.grup
             tombol = TombolBulat(dalam, menu.label,
                                  lambda m=menu: self.pilih(m), PANEL, KARTU,
-                                 HOVER_MENU, TEKS, FONT, tinggi=34, rata="w")
+                                 HOVER_MENU, TEKS, FONT,
+                                 tinggi=self.tinggi_tombol, rata="w")
             tombol.pack(fill="x", padx=12, pady=2)
             self.tombol_menu.append((menu, tombol))
         tk.Frame(dalam, bg=PANEL, height=12).pack()
@@ -964,13 +1004,15 @@ class AplikasiUI:
             if isian.petunjuk != "":
                 tk.Label(self.form, text=isian.petunjuk, font=FONT_KECIL,
                          fg=TEKS_REDUP, bg=KARTU, anchor="w", justify="left",
-                         wraplength=250).grid(row=2, column=kolom, sticky="w",
-                                              padx=(0, 16), pady=(4, 0))
+                         wraplength=self.px(250)).grid(row=2, column=kolom,
+                                                       sticky="w", padx=(0, 16),
+                                                       pady=(4, 0))
             self.vars.append(v)
             kolom += 1
-        lebar_tombol = len(menu.tombol) * 11 + 52
+        lebar_tombol = self.f_tebal.measure(menu.tombol) + self.px(48)
         TombolBulat(self.form, menu.tombol, self.jalankan, KARTU, UNGU,
-                    UNGU_HOVER, "white", FONT_TEBAL, tinggi=36,
+                    UNGU_HOVER, "white", FONT_TEBAL,
+                    tinggi=self.tinggi_tombol + self.px(2),
                     lebar=lebar_tombol, radius=14).grid(
             row=1, column=kolom, sticky="w", pady=(4, 0))
         if self.entri_pertama is not None:
@@ -990,7 +1032,7 @@ class AplikasiUI:
         except ValueError as galat:
             self._tampilkan_galat(str(galat))
             return
-        except Exception as galat:     # galat tak terduga: tampilkan, jangan crash
+        except Exception as galat:
             self._tampilkan_galat(f"Galat: {galat}")
             return
         finally:
@@ -1017,15 +1059,17 @@ class AplikasiUI:
     def _isi_tabel(self, kolom, baris):
         self.tabel.configure(columns=kolom)
         n = len(kolom)
+        lebar_char = self.f_tabel.measure("0")
         for i in range(n):
             lebar = len(kolom[i])
             for r in range(min(len(baris), BATAS_TAMPIL)):
                 panjang = len(str(baris[r][i]))
                 if panjang > lebar:
                     lebar = panjang
-            px = min(max(lebar * 9 + 28, 80), 440)
+            lebar_px = min(max(lebar * lebar_char + self.px(28), self.px(90)),
+                           self.px(500))
             self.tabel.heading(kolom[i], text=kolom[i], anchor="w")
-            self.tabel.column(kolom[i], width=px, minwidth=50,
+            self.tabel.column(kolom[i], width=lebar_px, minwidth=self.px(50),
                               stretch=(i == n - 1), anchor="w")
         for r in baris:
             if self.baris_ke % 2 == 1:
@@ -1035,7 +1079,7 @@ class AplikasiUI:
             self.baris_ke += 1
 
     def _catat(self, hasil):
-        teks = (f"{hasil.perintah:<24}-> {hasil.modul:<22}"
+        teks = (f"{hasil.perintah:<30}-> {hasil.modul:<22}"
                 f"{fmt_ms(hasil.ms):>10} ms\n")
         self.cmd.configure(state="normal")
         self.cmd.insert("1.0", teks)

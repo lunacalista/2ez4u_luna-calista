@@ -207,7 +207,7 @@ def binary_search(A, target, kunci=None, pencacah=None):
         pencacah = Pencacah()
     lo = 0
     hi = len(A) - 1
-    while lo <= hi:                   # <=, bukan <
+    while lo <= hi:                   
         mid = (lo + hi) // 2
         nilai = A[mid] if kunci is None else kunci(A[mid])
         pencacah.perbandingan += 1
@@ -228,10 +228,7 @@ def bangun_indeks_oid(A, pencacah=None):
     """
     return merge_sort(A, kunci_oid, pencacah)
 
-
-# ------------------------------------------------------------------
 # Pembungkus untuk UI: hasil + pencacah + waktu (ms, lewat ukur() milik M1)
-# ------------------------------------------------------------------
 def jalankan_sort(data, jumlah, nama_kunci, metode):
     """Mengurutkan `jumlah` baris pertama `data` (list Pesanan), data asli utuh.
 

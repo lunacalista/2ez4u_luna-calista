@@ -1,9 +1,17 @@
- # M1: data pesanan, Array (larik dinamis) vs Linked List
+"""M1: Data Pesanan - Array (dynamic) vs Linked List.
+
+Aturan: tanpa dict, set, sorted, .sort(), heapq, bisect, collections.*.
+Hanya list sebagai larik primitif, tuple, aritmetika, dan I/O.
+"""
 import csv
 import time
 
 
 class Pesanan:
+    """Satu baris pesanan. Memakai class biasa (bukan dict)."""
+    __slots__ = ("oid", "pelanggan", "resto", "menu", "harga",
+                 "prioritas", "t_masuk", "t_selesai", "status")
+
     def __init__(self, oid, pelanggan, resto, menu, harga,
                  prioritas, t_masuk, t_selesai, status):
         self.oid = oid
@@ -11,40 +19,41 @@ class Pesanan:
         self.resto = resto
         self.menu = menu
         self.harga = harga
-        self.prioritas = prioritas  # 1 VIP, 2 prioritas, 3 reguler
-        self.t_masuk = t_masuk      # dalam detik
-        self.t_selesai = t_selesai  # dalam detik, None kalau belum selesai
-        self.status = status        # DONE / CANCEL / ANTRE
+        self.prioritas = prioritas      # 1 VIP, 2 Prioritas, 3 Reguler
+        self.t_masuk = t_masuk          # detik
+        self.t_selesai = t_selesai      # detik atau None
+        self.status = status            # DONE / CANCEL / ANTRE
 
     def __repr__(self):
-        return f"Pesanan({self.oid}, {self.pelanggan})"
+        return f"Pesanan({self.oid}, {self.pelanggan}, p={self.prioritas})"
 
 
 class Array:
+    """Implementasi Dynamic Array dari blok memori berukuran tetap."""
     def __init__(self, capacity=4):
         if capacity < 1:
             capacity = 1
         self.capacity = capacity
         self.size = 0
-        self.data = [None] * capacity
+        self.data = [None] * self.capacity
 
-    def _resize(self, kapasitas_baru):
-        # bikin petak baru yang lebih besar, lalu salin isi yang lama
-        baru = [None] * kapasitas_baru
+    def _resize(self, new_capacity):
+        """Mengalokasikan petak baru 2x lipat dan menyalin isi lama."""
+        new_data = [None] * new_capacity
         for i in range(self.size):
-            baru[i] = self.data[i]
-        self.data = baru
-        self.capacity = kapasitas_baru
+            new_data[i] = self.data[i]
+        self.data = new_data
+        self.capacity = new_capacity
 
     def append(self, value):
-        # tambah di belakang, O(1) amortized
+        """Menambahkan elemen di paling belakang - O(1) amortized."""
         if self.size == self.capacity:
             self._resize(self.capacity * 2)
         self.data[self.size] = value
         self.size += 1
 
     def insert(self, index, value):
-        # sisip di indeks tertentu, elemen sesudahnya digeser ke kanan, O(n)
+        """Menyisipkan elemen pada indeks tertentu dengan menggeser - O(n)."""
         if index < 0 or index > self.size:
             raise IndexError("Indeks di luar jangkauan")
         if self.size == self.capacity:
@@ -55,13 +64,13 @@ class Array:
         self.size += 1
 
     def get(self, index):
-        # langsung ke indeksnya, O(1)
+        """Melihat elemen pada indeks ke-i - O(1)."""
         if index < 0 or index >= self.size:
             raise IndexError("Indeks di luar jangkauan")
         return self.data[index]
 
     def delete(self, index):
-        # hapus elemen, sisanya digeser ke kiri, O(n)
+        """Menghapus elemen ke-i dengan menggeser ke kiri - O(n)."""
         if index < 0 or index >= self.size:
             raise IndexError("Indeks di luar jangkauan")
         item = self.data[index]
@@ -71,15 +80,18 @@ class Array:
         self.size -= 1
         return item
 
-    # operasi yang dipanggil dari menu
+    # ---- Operasi bisnis M1 (nama seragam dengan LinkList) ----
     def tambah_reguler(self, pesanan):
-        self.append(pesanan)                # paling belakang
+        """REGULER: paling belakang."""
+        self.append(pesanan)
 
     def tambah_prioritas(self, pesanan):
-        self.insert(self.size // 2, pesanan)  # tengah
+        """PRIORITAS: ke tengah barisan."""
+        self.insert(self.size // 2, pesanan)
 
     def tambah_vip(self, pesanan):
-        self.insert(0, pesanan)             # paling depan
+        """VIP: urutan pertama."""
+        self.insert(0, pesanan)
 
     def lihat_pesanan(self, index):
         return self.get(index)
@@ -92,40 +104,43 @@ class Array:
 
 
 class Node:
+    """Simpul penampung nilai dan penunjuk ke simpul berikutnya."""
     def __init__(self, value):
         self.value = value
         self.next = None
 
 
 class LinkList:
+    """Singly Linked List dengan penunjuk head dan tail."""
     def __init__(self):
         self.head = None
-        self.tail = None   # disimpan supaya tambah di belakang tidak perlu menelusuri
+        self.tail = None
         self.size = 0
 
     def append(self, value):
-        # tambah di belakang lewat tail, O(1)
-        baru = Node(value)
+        """Menambahkan di belakang - O(1) memakai tail."""
+        new_node = Node(value)
         if self.head is None:
-            self.head = baru
-            self.tail = baru
+            self.head = new_node
+            self.tail = new_node
         else:
-            self.tail.next = baru
-            self.tail = baru
+            self.tail.next = new_node
+            self.tail = new_node
         self.size += 1
 
     def insert_front(self, value):
-        # tambah di depan, cukup ubah head, O(1)
-        baru = Node(value)
+        """Menyisipkan di depan - O(1)."""
+        new_node = Node(value)
         if self.head is None:
-            self.tail = baru
+            self.head = new_node
+            self.tail = new_node
         else:
-            baru.next = self.head
-        self.head = baru
+            new_node.next = self.head
+            self.head = new_node
         self.size += 1
 
     def insert(self, index, value):
-        # sisip di indeks ke-i, harus menelusuri dulu, O(n)
+        """Menyisipkan pada indeks ke-i melalui penelusuran - O(n)."""
         if index < 0 or index > self.size:
             raise IndexError("Indeks di luar jangkauan")
         if index == 0:
@@ -133,48 +148,48 @@ class LinkList:
         elif index == self.size:
             self.append(value)
         else:
-            baru = Node(value)
-            sekarang = self.head
+            new_node = Node(value)
+            curr = self.head
             for _ in range(index - 1):
-                sekarang = sekarang.next
-            baru.next = sekarang.next
-            sekarang.next = baru
+                curr = curr.next
+            new_node.next = curr.next
+            curr.next = new_node
             self.size += 1
 
     def get(self, index):
-        # telusuri dari head sampai indeks ke-i, O(n)
+        """Melihat elemen ke-i dengan menelusuri dari head - O(n)."""
         if index < 0 or index >= self.size:
             raise IndexError("Indeks di luar jangkauan")
-        sekarang = self.head
+        curr = self.head
         for _ in range(index):
-            sekarang = sekarang.next
-        return sekarang.value
+            curr = curr.next
+        return curr.value
 
     def delete(self, index):
+        """Menghapus elemen ke-i - O(n)."""
         if index < 0 or index >= self.size:
             raise IndexError("Indeks di luar jangkauan")
 
-        # kalau yang dihapus simpul pertama
         if index == 0:
-            nilai = self.head.value
+            val = self.head.value
             self.head = self.head.next
             if self.head is None:
                 self.tail = None
             self.size -= 1
-            return nilai
+            return val
 
-        # selain itu, berhenti di simpul sebelum target lalu putus sambungannya
-        sebelum = self.head
+        curr = self.head
         for _ in range(index - 1):
-            sebelum = sebelum.next
-        target = sebelum.next
-        sebelum.next = target.next
+            curr = curr.next
+        target = curr.next
+        val = target.value
+        curr.next = target.next
         if target is self.tail:
-            self.tail = sebelum
+            self.tail = curr
         self.size -= 1
-        return target.value
+        return val
 
-    # operasi yang dipanggil dari menu
+    # ---- Operasi bisnis M1 ----
     def tambah_reguler(self, pesanan):
         self.append(pesanan)
 
@@ -194,39 +209,105 @@ class LinkList:
         return self.size
 
 
+# ------------------------------------------------------------------
+# Pemuatan data & pengukuran waktu
+# ------------------------------------------------------------------
+def _ke_int_atau_none(teks):
+    teks = teks.strip()
+    if teks == "":
+        return None
+    return int(teks)
+
+
 def baca_csv(path):
-    # baca pesanan.csv jadi Array berisi Pesanan
-    # pakai csv.reader karena nama pelanggan bisa mengandung koma di dalam tanda kutip
+    """Membaca pesanan.csv -> Array berisi objek Pesanan.
+
+    Memakai csv.reader karena kolom pelanggan bisa mengandung koma di dalam
+    tanda kutip (mis. "Dr. Raina Firmansyah, S.I.Kom"); split(",") akan salah.
+    """
     hasil = Array(1024)
     with open(path, newline="", encoding="utf-8") as f:
-        baca = csv.reader(f)
-        next(baca)  # lewati baris header
-        for b in baca:
-            if len(b) < 9:
+        pembaca = csv.reader(f)
+        next(pembaca, None)  # lewati header
+        for baris in pembaca:
+            if len(baris) < 9:
                 continue
-            selesai = None
-            if b[7] != "":
-                selesai = int(b[7])
-            hasil.append(Pesanan(b[0], b[1], b[2], b[3], int(b[4]),
-                                 int(b[5]), int(b[6]), selesai, b[8]))
+            hasil.append(Pesanan(
+                baris[0], baris[1], baris[2], baris[3],
+                int(baris[4]), int(baris[5]), int(baris[6]),
+                _ke_int_atau_none(baris[7]), baris[8].strip(),
+            ))
     return hasil
 
 
+def muat_ke_struktur(path):
+    """Memuat CSV ke Array dan LinkList (urutan file, lewat append).
+
+    Mengembalikan (arr, ll, ms_array, ms_linklist).
+    """
+    sumber = baca_csv(path)
+
+    t0 = time.perf_counter()
+    arr = Array()
+    for i in range(len(sumber)):
+        arr.tambah_reguler(sumber.get(i))
+    ms_arr = (time.perf_counter() - t0) * 1000
+
+    t0 = time.perf_counter()
+    ll = LinkList()
+    for i in range(len(sumber)):
+        ll.tambah_reguler(sumber.get(i))
+    ms_ll = (time.perf_counter() - t0) * 1000
+
+    return arr, ll, ms_arr, ms_ll
+
+
 def ukur(fungsi, *args):
-    # jalankan fungsi, kembalikan (hasilnya, waktu dalam ms)
-    mulai = time.perf_counter()
+    """Menjalankan fungsi dan mengembalikan (hasil, waktu_ms)."""
+    t0 = time.perf_counter()
     hasil = fungsi(*args)
-    return hasil, (time.perf_counter() - mulai) * 1000
+    return hasil, (time.perf_counter() - t0) * 1000
+
+
+# ------------------------------------------------------------------
+# Benchmark M1: Array vs LinkList pada data CSV
+# Pakai:  python backend/m1_pesanan.py [data/pesanan.csv]
+# Hasilnya bisa disalin ke tabel di README.
+# ------------------------------------------------------------------
+def _pesanan_baru(prioritas):
+    return Pesanan("O-BARU", "Pelanggan Baru", "kafe-teknik", "roti-bakar",
+                   12000, prioritas, 0, None, "ANTRE")
+
+
+def _rata_rata(fungsi, ulang=5):
+    total = 0.0
+    for _ in range(ulang):
+        _, ms = ukur(fungsi)
+        total += ms
+    return total / ulang
+
+
+def benchmark(path="data/pesanan.csv"):
+    arr, ll, ms_a, ms_l = muat_ke_struktur(path)
+    print(f"Data dimuat: {len(arr)} baris | load Array {ms_a:.2f} ms | "
+          f"load LinkList {ms_l:.2f} ms\n")
+
+    kasus = (
+        ("Lihat tengah", lambda s: s.lihat_pesanan(len(s) // 2)),
+        ("Tambah REGULER", lambda s: s.tambah_reguler(_pesanan_baru(3))),
+        ("Tambah PRIORITAS", lambda s: s.tambah_prioritas(_pesanan_baru(2))),
+        ("Tambah VIP", lambda s: s.tambah_vip(_pesanan_baru(1))),
+        ("Hapus tengah", lambda s: s.hapus_pesanan(len(s) // 2)),
+    )
+
+    print(f"{'Operasi':<18}{'Array (ms)':>12}{'LinkList (ms)':>16}")
+    print("-" * 46)
+    for nama, op in kasus:
+        t_arr = _rata_rata(lambda: op(arr))
+        t_ll = _rata_rata(lambda: op(ll))
+        print(f"{nama:<18}{t_arr:>12.4f}{t_ll:>16.4f}")
 
 
 if __name__ == "__main__":
-    # python backend/m1_pesanan.py data/pesanan.csv
     import sys
-    path = "data/pesanan.csv"
-    if len(sys.argv) > 1:
-        path = sys.argv[1]
-
-    data, ms = ukur(baca_csv, path)
-    print(f"Terbaca {len(data)} pesanan dalam {ms:.2f} ms")
-    print("Pesanan pertama :", data.get(0), data.get(0).menu)
-    print("Pesanan terakhir:", data.get(len(data) - 1), data.get(len(data) - 1).menu)
+    benchmark(sys.argv[1] if len(sys.argv) > 1 else "data/pesanan.csv")

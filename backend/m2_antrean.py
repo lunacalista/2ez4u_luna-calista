@@ -356,7 +356,7 @@ def proses_kasir(ekspresi):
     return postfix, total, langkah
 
 
-# Manajer: aksi antrean + undo/redo, menjaga kedua antrean tetap sama
+# Manajer: aksi antrean dan undo/redo, menjaga kedua antrean tetap sama
 def _nama(item):
     """oid bila item adalah Pesanan, selain itu teksnya sendiri."""
     if hasattr(item, "oid"):
